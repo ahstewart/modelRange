@@ -164,7 +164,7 @@ class ModelRange extends ConsumerWidget {
             onPressed: () {
               ref.read(selectedIndexProvider.notifier).state = 0;
             },
-            child: Text('Back to Model List'),
+            child: Text('Back to Model List Yo!'),
           ),
           Text("You're looking at the model range for: "),
           Text('Model Name: ${selectedModel.name}'),
