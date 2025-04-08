@@ -75,7 +75,7 @@ final selectedModelProvider = StateProvider<Model>((ref) {
 final modelProvider = Provider<List<Model>>((ref) {
   return const [
     Model(
-      name: 'byoussef/MobileNetV4_Conv_Small_TFLite_224',
+      name: 'yourmom/Moball_TFLite_2244',
       description: 'A small MobileNetV4 model for image classification',
       pipelineTag: 'image-classification',
       likes: 10,),
