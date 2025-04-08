@@ -3,8 +3,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 //import 'package:freezed_annotation/freezed_annotation.dart';
 //import 'package:flutter/foundation.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
-
+import 'ml_tasks.dart';
 part 'main.freezed.dart';
+
 // optional: Since our Person class is serializable, we must add this line.
 // But if Person was not serializable, we could skip it.
 //part 'main.g.dart';
@@ -88,6 +89,11 @@ final modelProvider = Provider<List<Model>>((ref) {
       description: '',
       pipelineTag: 'text-classification',
       likes: 0,),
+    Model(
+      name: 'byoussef/MobileNetV4_Conv_Small_TFLite_224',
+      description: 'Image classification model optimized for mobile',
+      pipelineTag: 'image-classification',
+      likes: 1,),
   ];
 });
 
@@ -97,9 +103,9 @@ class Models extends ConsumerWidget {
   const Models({super.key});
 
   static final Map model1 = {
-  'name': 'byoussef/MobileNetV4_Conv_Small_TFLite_224',
+  'name': 'yourmom/Moball_TFLite_224',
   'description': '',
-  'pipeline_tag': 'image-classification',
+  'pipeline_tag': 'text-to-text',
   'likes': 10
   };
 
@@ -116,6 +122,15 @@ class Models extends ConsumerWidget {
   'pipeline_tag': 'text-classification',
   'likes': 0
   };
+
+   static final Map model4 = {
+  'name': 'byoussef/MobileNetV4_Conv_Small_TFLite_224',
+  'description': 'Image classification model optimized for mobile',
+  'pipeline_tag': 'image-classification',
+  'likes': 1
+  };
+
+  
 
   //final List modelList = [model1, model2, model3];
 
@@ -155,6 +170,11 @@ class ModelRange extends ConsumerWidget {
     // check if no model has been selected
     if ((selectedModel.name == '') && (selectedModel.pipelineTag == '') && (selectedModel.description == 0)) {
       return Text('Select a model to check out the range!');
+    }
+
+    // check if the selected model is the one we've built inference for
+    else if (selectedModel.name == "byoussef/MobileNetV4_Conv_Small_TFLite_224") {
+      return const ImageClassificationWidget();
     }
     
     //if model has been selected, show the model range
