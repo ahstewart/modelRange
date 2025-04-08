@@ -3,6 +3,7 @@
 
 import 'dart:ffi';
 import 'dart:io';
+import 'dart:math' as Math;
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show rootBundle;
@@ -98,6 +99,14 @@ class _ImageClassificationWidgetState extends ConsumerState<ImageClassificationW
     }
   }
 
+  // apply the softmax function on a given list of floats
+  List<double> applySoftmax(List<double> raw_inputs) {
+    double max_input = raw_inputs.reduce((a,b) => a > b ? a : b);
+    List<double> exps = raw_inputs.map((input) => Math.exp(input - max_input)).toList();
+    double sumExps = exps.reduce((a, b) => a + b);
+    return exps.map((exp) => exp / sumExps).toList();
+  }
+
 // enable the selection of images
   Future<void> _pickImage(ImageSource source) async {
     if (_isLoading) return; // can't pick an image if inference is currently happening
@@ -148,11 +157,11 @@ class _ImageClassificationWidgetState extends ConsumerState<ImageClassificationW
       // normalize image values around mean and std defined in the MMS
       var imageBytes = resizedImage.getBytes(order: img.ChannelOrder.rgb);
       var inputBytes = Float32List(_inputWidth * _inputHeight * 3);
-      var inputIndex = 0; // ensure new image starts at the beginning (zero index)
+      // var inputIndex = 0;
       for (int i = 0; i <imageBytes.length; i +=3) {
-        inputBytes[inputIndex++] = (imageBytes[i] - _mean) / _std;
-        inputBytes[inputIndex++] = (imageBytes[i+1] - _mean) / _std;
-        inputBytes[inputIndex++] = (imageBytes[i+2] - _mean) / _std;
+        inputBytes[i] = (imageBytes[i] - _mean) / _std;
+        inputBytes[i+1] = (imageBytes[i+1] - _mean) / _std;
+        inputBytes[i+2] = (imageBytes[i+2] - _mean) / _std;
       }
       // reshape normalized image
       final input = inputBytes.reshape([1, _inputWidth, _inputHeight, 3]);
@@ -167,13 +176,16 @@ class _ImageClassificationWidgetState extends ConsumerState<ImageClassificationW
       // postprocessing, understand the outputted results and display them
       final List<double> outputScores = output[0] as List<double>;
 
+      // apply softmax to recognitions
+      final List<double> outputScores_softmax = applySoftmax(outputScores);
+
       // create map of labels: probabilities (will softmax later)
       List<Map<String, dynamic>> recongnitions = [];
-      for (int i=0; i<outputScores.length; i++) {
+      for (int i=0; i<outputScores_softmax.length; i++) {
         recongnitions.add({
           "index": i,
           "label": _labels![i],
-          "confidence": outputScores[i],
+          "confidence": outputScores_softmax[i],
         });
       }
 
@@ -183,6 +195,8 @@ class _ImageClassificationWidgetState extends ConsumerState<ImageClassificationW
       setState(() {
         _recognitions = recongnitions;
       });
+
+
     }
 
     catch (e) {
