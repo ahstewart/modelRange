@@ -1,0 +1,101 @@
+schema_version: 1.0.0
+model_name: SSD MobileNet v1 (Quantized Example)
+model_version: v1.0
+model_task: object_detection
+framework: tflite
+source_repository: https://tfhub.dev/tensorflow/ssd_mobilenet_v1/1
+
+inputs:
+  - name: image_tensor  # Common input tensor name for TF detection models
+    shape: [1, 300, 300, 3]  # Input shape [batch, height, width, channels]
+    dtype: uint8  # Data type expected by the quantized model (as assumed in example code)
+
+outputs:
+  # Standard output tensor order for many TensorFlow object detection TFLite models
+  # NOTE: Verify the exact names, shapes, and order for your specific model!
+  - name: detection_boxes  # Tensor containing bounding boxes
+    shape: [1, 10, 4]  # [batch, max_detections, 4 coords] (Assuming max 10 detections)
+    dtype: float32  # Usually float for normalized coordinates
+
+  - name: detection_classes  # Tensor containing class indices
+    shape: [1, 10]  # [batch, max_detections]
+    dtype: float32  # Often float, needs casting to int for label lookup
+
+  - name: detection_scores  # Tensor containing confidence scores
+    shape: [1, 10]  # [batch, max_detections]
+    dtype: float32
+
+  - name: num_detections  # Tensor containing the actual number of valid detections
+    shape: [1]  # [batch]
+    dtype: float32  # Often float, needs casting to int
+
+preprocessing:
+  - input_name: image_tensor  # Links to the input tensor defined above
+    expects_type: image  # Tells the UI to expect an image input
+    steps:
+      - step: resize
+        params:
+          height: 300  # Target height from input shape
+          width: 300  # Target width from input shape
+          method: bilinear  # Common resizing method
+
+      # No explicit normalization step here because the input dtype is uint8,
+      # implying the model expects pixel values in the [0, 255] range.
+      # If the model expected float input (e.g., [-1, 1]), a "normalize" step
+      # like in the classification metadata would be needed here.
+      - step: format
+        params:
+          target_dtype: uint8  # Matches input tensor dtype
+          color_space: RGB
+          data_layout: NHWC
+
+postprocessing:
+  # Define how to interpret the raw output tensors into meaningful results
+  - output_name: detection_results
+    # Specifies the overall meaning and guides which steps are relevant
+    interpretation: detection_boxes_scores_classes
+    # Lists the raw output tensors needed for this interpretation
+    source_tensors:
+      - detection_boxes
+      - detection_classes
+      - detection_scores
+      - num_detections
+    # Specifies the format of the coordinates in the 'detection_boxes' tensor
+    coordinate_format: normalized_ymin_xmin_ymax_xmax
+    steps:
+      # Filter out detections below a certain confidence level
+      - step: filter_by_score
+        params:
+          threshold: 0.5  # Threshold value used in the Flutter code example
+          # Specify which tensors provide the necessary info
+          score_tensor: detection_scores
+          num_detections_tensor: num_detections
+
+      # Decode bounding boxes (implies scaling in the UI/Painter based on coordinate_format)
+      - step: decode_boxes
+        params:
+          box_tensor: detection_boxes
+          # The coordinate_format above informs how these values should be interpreted/scaled
+
+      # Map the numerical class indices to human-readable labels
+      - step: map_labels
+        params:
+          # URL/Path to the label file (matches the one in the Flutter code)
+          labels_url: assets/coco_labels.txt
+          # Specify which tensor holds the class indices
+          class_tensor: detection_classes
+          # Optional: Specify offset if label file doesn't include background class at index 0
+          # label_offset: 1
+
+      # --- Optional Non-Maximum Suppression (NMS) ---
+      # NMS is often crucial for cleaning up overlapping boxes in object detection.
+      # Some models have NMS built-in, others require it in postprocessing.
+      # The example Flutter code skipped manual NMS implementation for simplicity.
+      #
+      # - step: apply_nms
+      #   params:
+      #     iou_threshold: 0.45  # Intersection-over-Union threshold
+      #     # Score threshold might be reapplied here or handled by filter_by_score
+      #     score_threshold: 0.5
+      #     box_tensor: detection_boxes  # Tensor providing boxes for NMS input
+      #     score_tensor: detection_scores  # Tensor providing scores for NMS input

@@ -29,8 +29,11 @@ var modelName = 'assets/mobilenetv4_conv_small.e2400_r224_in1k_float32.tflite';
 var labelName = 'assets/imagenet_classes.txt';
 
 
+// to generalize the image classification task, we need the image classification widget to accept the model metadata 
+
 class ImageClassificationWidget extends ConsumerStatefulWidget {
-  const ImageClassificationWidget({super.key});
+  final Map metadata;
+  const ImageClassificationWidget({super.key, required this.metadata,});
 
   @override
   ConsumerState<ImageClassificationWidget> createState() => _ImageClassificationWidgetState();
@@ -55,14 +58,56 @@ class _ImageClassificationWidgetState extends ConsumerState<ImageClassificationW
   @override
   void initState() {
     super.initState();
-    _initializeInterpreter(modelName);
-    _loadLabels(labelName);
+    // initialize model interpreter based on "framework" parameter in model metadata
+    // valid vaLues are "tflite", 
+    if (widget.metadata['framework'] == "tflite") {
+      _initializeInterpreter(widget.metadata['source_repository']);
+    }
+    else {
+      if (kDebugMode) {
+        debugPrint("Error loading model: Invalid 'framework' parameter");
+      }
+    }
+    // load in labels using metadata
+    try {
+      _loadLabels(getLabelPath(widget.metadata));
+    }
+    catch (e) {
+      if (kDebugMode) {
+        debugPrint("Error loading labels: $e");
+      }
+    }
+    
   }
 
   @override dispose() {
     _interpreter?.close();
     super.dispose();
   }
+
+
+    // method to traverse the metadata Map to fetch the label path (label_url)
+  String getLabelPath(Map metadata) {
+   try {
+    final postprocessing = metadata['postprocessing'] as List;
+    for (var step in postprocessing) {
+      final steps = step['steps'] as List;
+      for (var substep in steps) {
+        if (substep['step'] == 'map_labels') {
+          return substep['params']['labels_url'] as String;
+        }
+      }
+    }
+      throw Exception("Could not find 'labels_url' in model metadata postprocessing step.");
+    }
+    catch (e) {
+    if (kDebugMode) {
+      debugPrint('Error getting label path: $e');
+    }
+    return "Error getting label URL";
+  }
+}
+
 
   // create interpreter to load the model
   Future<void> _initializeInterpreter(String modelPath) async {
@@ -134,6 +179,12 @@ class _ImageClassificationWidgetState extends ConsumerState<ImageClassificationW
 
   }
 
+  img.Image imagePreProcessing(Map metadata) {
+    final preprocessing_steps = metadata['preprocessing'];
+
+    
+  }
+
   // run inference on image
   Future<void> _runInference(File imageFile) async {
     if (_interpreter == null || _labels == null) {
@@ -153,10 +204,11 @@ class _ImageClassificationWidgetState extends ConsumerState<ImageClassificationW
       img.Image? image = img.decodeImage(await imageFile.readAsBytes());
       if (image == null) throw Exception("Could not decode image");
       // resize image to sizes defined in the model metadata schema (MMS)
+      
       img.Image resizedImage = img.copyResize(image, width: _inputWidth, height: _inputHeight);
       // normalize image values around mean and std defined in the MMS
       var imageBytes = resizedImage.getBytes(order: img.ChannelOrder.rgb);
-      var inputBytes = Float32List(_inputWidth * _inputHeight * 3);
+      var inputBytes = Float32List(_inputHeight * _inputWidth * 3);
       // var inputIndex = 0;
       for (int i = 0; i <imageBytes.length; i +=3) {
         inputBytes[i] = (imageBytes[i] - _mean) / _std;

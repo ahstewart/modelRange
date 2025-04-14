@@ -1,0 +1,70 @@
+schema_version: 1.0.0
+model_name: MobileNet v1 (Float Example)
+model_version: 1.0_224
+model_task: image_classification
+framework: tflite
+source_repository: https://tfhub.dev/google/imagenet/mobilenet_v1_1.0_224/classification/1  # Example source
+
+inputs:
+  - name: input_1  # Example input tensor name
+    # Input shape [batch, height, width, channels]
+    shape: [1, 224, 224, 3]
+    dtype: float32  # Data type expected by this float model
+
+outputs:
+  - name: output_1  # Example output tensor name
+    # Shape assumes standard ImageNet 1001 classes (incl. background)
+    # Adjust if your model/labels have a different number of classes
+    shape: [1, 1001]
+    dtype: float32  # Model output is typically float scores/logits
+
+preprocessing:
+  - input_name: input_1  # Links to the input tensor defined above
+    expects_type: image  # Tells the UI to expect an image input
+    steps:
+      - step: resize
+        params:
+          height: 224  # Target height from input shape
+          width: 224  # Target width from input shape
+          method: bilinear  # Common resizing method
+
+      # Normalization to scale pixel values to [-1, 1] range
+      # Matches the (value - 127.5) / 127.5 logic in the example code
+      - step: normalize
+        params:
+          method: mean_stddev
+          # For this normalization type, mean and std are often applied per pixel value
+          mean: [127.5]
+          stddev: [127.5]
+          # Alternatively, could use:
+          # method: scale_shift
+          # scale: 1.0/127.5
+          # shift: -1.0
+
+      - step: format
+        params:
+          target_dtype: float32  # Matches input tensor dtype
+          color_space: RGB
+          data_layout: NHWC
+
+postprocessing:
+  # Define how to interpret the raw output tensor
+  - output_name: classification_result  # Logical name for the final output
+    # Indicates the raw tensor contains scores/logits for classification
+    # The example code directly sorts these without applying softmax,
+    # so 'classification_scores' is appropriate. If probabilities were needed
+    # for display, 'classification_logits' could be used with an 'apply_activation' step.
+    interpretation: classification_scores
+    source_tensors: [output_1]  # Links to the raw output tensor
+    steps:
+      # Note: An "apply_activation" step with "function": "softmax" could be added here
+      # if the model outputs logits and normalized probabilities are desired.
+      # The current Flutter example code works directly with the scores for sorting.
+      - step: map_labels
+        params:
+          # URL/Path to the label file (matches the one in the Flutter code)
+          labels_url: assets/labels.txt
+          # Specify which tensor holds the scores/logits corresponding to labels
+          class_tensor: output_1
+          # Specify how many top results to return (matches Flutter code display)
+          top_k: 3
