@@ -1,0 +1,27 @@
+Main object: Model Pipeline YAML file
+Components:
+    Metadata - set of key:value pairs
+    inputs - List of inputs
+        Input:
+            name - string
+            shape - List<int>
+            dtype - string
+    outputs - List of inputs
+        Input:
+            name - string
+            shape - List<int>
+            dtype - string
+    preprocessing - list of preprocessing blocks, each block applies to an input
+        preprocessing block:
+            input_name - string
+            expects_type - string
+            steps - list of processing steps
+                step - string
+                params - Map<String, dynamic>
+    postprocessing - list of postprocessing blocks, each block applies to an input
+        postprocessing block:
+            output_name - string
+            expects_type - string
+            steps - list of processing steps
+                step - string
+                params - Map<String, dynamic>
