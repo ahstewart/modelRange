@@ -23,7 +23,7 @@ class Pipeline {
     required this.outputs,
     required this.preprocessing,
     required this.postprocessing,
-  })
+  });
 
   // factory to generate Dart object from decoded JSON
   factory Pipeline.fromJson(Map<String, dynamic> json) => _$PipelineFromJson(json);
@@ -56,7 +56,7 @@ class ModelMetadata {
     required this.model_task,
     required this.framework,
     required this.source_repository,
-  })
+  });
 
   factory ModelMetadata.fromJson(Map<String, dynamic> json) => _$ModelMetadataFromJson(json);
   Map<String, dynamic> toJson() => _$ModelMetadataToJson(this);
@@ -81,7 +81,7 @@ class IO {
     required this.shape,
     required this.dtype,
     required this.description,
-  })
+  });
 
   factory IO.fromJson(Map<String, dynamic> json) => _$IOFromJson(json);
   Map<String, dynamic> toJson() => _$IOToJson(this);
@@ -111,7 +111,7 @@ class ProcessingBlock {
     required this.interpretation,
     required this.source_tensors,
     required this.steps,
-  })
+  });
 
   factory ProcessingBlock.fromJson(Map<String, dynamic> json) => _$ProcessingBlockFromJson(json);
   Map<String, dynamic> toJson() => _$ProcessingBlockToJson(this);
@@ -129,7 +129,7 @@ class ProcessingStep {
   ProcessingStep({
     required this.step,
     required this.params,
-  })
+  });
 
   factory ProcessingStep.fromJson(Map<String, dynamic> json) => _$ProcessingStepFromJson(json);
   Map<String, dynamic> toJson() => _$ProcessingStepToJson(this);
