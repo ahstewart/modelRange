@@ -10,6 +10,73 @@ import 'package:tflite_flutter/tflite_flutter.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
+import 'data_models.dart';
+import 'package:yaml/yaml.dart';
+
+
+// inference object that contains methods for loading models, pre and post processing, and running the actual inference
+class InferenceObject {
+  final String modelPath;
+  final String pipelinePath;
+
+  // initialize interpreter, pipeline (metadata), etc
+  Interpreter? _interpreter;
+  Pipeline? modelPipeline;
+  List<String>? _labels;
+  bool _isLoading = false;
+  File? _selectedImage;
+  List<dynamic>? _recognitions;
+
+  const InferenceObject {
+    loadModel(modelPath);
+    loadPipeline(pipelinePath);
+  }
+
+  // load model from model_path (AKA create an interpreter)
+  Future<void> loadModel(String modelPath, {String modelFramework="tflite"}) async {
+    if (modelFramework == "tflite") {
+      final options = InterpreterOptions();
+
+      try {
+        _interpreter = await Interpreter.fromAsset(modelPath, options:options);
+
+        if (kDebugMode) {
+          debugPrint(_interpreter?.getInputTensors().toString());
+          debugPrint(_interpreter?.getOutputTensors().toString());
+        }
+      }
+      catch (e) {
+        if (kDebugMode) {
+          debugPrint("Failed to load model: $e");
+        }
+      }
+    }
+  }
+
+  // load pipeline from a pipeline_path, using the pipeline data model
+  Future<void> loadPipeline(String pipelinePath) async {
+    // get string from pipeline file
+    String pipelineContents = await File(pipelinePath).readAsString();
+    // parse the string using the yaml package and return the parsed map
+    YamlMap pipelineYamlMap = loadYaml(pipelineContents);
+    // convert YAML map to Map<String, 
+    Map<String, dynamic> pipelineMap = _convertYamlToJson(pipelineYamlMap);
+
+    // create pipeline object from pipeline_map
+    modelPipeline = Pipeline.fromJson(pipelineMap);
+  }
+
+  // helper method for converting YAML map to JSON
+  Map<String, dynamic> _convertYamlToJson(YamlMap yaml) {
+      return yaml.map((key, value) => MapEntry(
+        key.toString(), 
+        value is YamlMap ? _convertYamlToJson(value) : value,
+      ));
+  }
+  
+
+
+}
 
 
 class imagePreprocessing {
