@@ -70,7 +70,7 @@ class IO {
   @JsonKey(required: true)
   final String name;
   @JsonKey(defaultValue: '')
-  final String shape;
+  final List<int> shape;
   @JsonKey(required: true)
   final String dtype;
   @JsonKey(defaultValue: '')

@@ -20,7 +20,10 @@ outputs:
 
 preprocessing:
   - input_name: input_1  # Links to the input tensor defined above
-    expects_type: image  # Tells the UI to expect an image input
+    expects_type: image, audio, text
+        image: img.Image
+        text: String
+        audio: Uint8List
     steps:
       - step: resize
         params:
@@ -36,7 +39,6 @@ preprocessing:
           # For this normalization type, mean and std are often applied per pixel value
           mean: [127.5]
           stddev: [127.5]
-          color_space: 'RGB'
           # Alternatively, could use:
           # method: scale_shift
           # scale: 1.0/127.5

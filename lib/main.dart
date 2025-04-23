@@ -3,8 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 //import 'package:freezed_annotation/freezed_annotation.dart';
 //import 'package:flutter/foundation.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
-import 'ml_tasks.dart';
-part 'main.freezed.dart';
+import 'widgets/image_classification.dart';
 
 // optional: Since our Person class is serializable, we must add this line.
 // But if Person was not serializable, we could skip it.
