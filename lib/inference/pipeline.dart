@@ -184,7 +184,7 @@ class InferenceObject {
       return currentInput;
   }
 
-
+  // CREATING POSTPROCESS METHOD
   // postprocess will take a map of all the outputted tensors and their associated output_names, and iterate through every
   Future<dynamic> postprocess(Map<String, dynamic> outputMap) async {
     // make sure pipeline includes postprocessing steps? if it doesn't, skip all of this and return rawInput
