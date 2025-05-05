@@ -184,101 +184,49 @@ class InferenceObject {
       return currentInput;
   }
 
-  // CREATING POSTPROCESS METHOD
-  // postprocess will take a map of all the outputted tensors and their associated output_names, and iterate through every
-  Future<dynamic> postprocess(Map<String, dynamic> outputMap) async {
+  // postprocess complete a postprocessing block and return a Map which will be the final inference result
+  // the input to postprocess is the postprocessing block, the raw outputs map (source tensors), and the final result map
+  Future<dynamic> postprocess(Map<String, dynamic> rawOutputs, int postprocessBlockIndex, Map<String, dynamic> finalResults) async {
+    // declare some variables to make things easier
+    ProcessingBlock block = modelPipeline!.postprocessing[postprocessBlockIndex];
+    String outputName = block.output_name;
+    
     // make sure pipeline includes postprocessing steps? if it doesn't, skip all of this and return rawInput
     if (modelPipeline!.postprocessing.isEmpty) {
       if (kDebugMode) {
             debugPrint("Pipeline is missing postprocessing blocks, returning raw output unchanged.");
           }
-      return rawOutput;
-    }
-    // if postprocessing blocks are included, then match the step with an output using output_name
-    int? _outputIndex;
-    int? _postprocessBlockIndex;
-
-    // match _inputName to an input block
-      for (var i; i < modelPipeline!.outputs.length; i++) {
-        if (modelPipeline!.outputs[i].name == _outputName) {
-          _outputIndex = i;
-          break;
-      }
+      return finalResults;
     }
 
-    // match _inputName to a preprocessing block
-    for (var i; i < modelPipeline!.postprocessing.length; i++) {
-      if (modelPipeline!.postprocessing[i].input_name == _outputName) {
-        _postprocessBlockIndex = i;
-        break;
-      }
-    }
-
-    // check if the input could not be matched to an input block or preprocessing block
-    if (_outputIndex == null || _postprocessBlockIndex == null) {
-      if (kDebugMode) {
-            debugPrint("Provided input name does not match input or preprocessing block in pipeline. Aborting preprocessing.");
-          }
-      return rawInput;
-    }
-
-    // once the preprocessing step and input are matched, use the expects_type to validate the rawInput
-    final String _expectedType = modelPipeline!.preprocessing[_preprocessBlockIndex].expects_type;
-
-    switch (_expectedType) {
-      case 'image':
-        if (rawInput is! img.Image) {
-          if (kDebugMode) {
-            debugPrint("Raw input type: $rawInput.rawInput.runtimeType.toString()");
-            throw ArgumentError("This preprocessing block expects an image, but raw input is not an img.Image type. Aborting preprocessing.");
-          }
-          return rawInput;
-        }
+    // check that all source tensors in the postprocessing block are present in the output map
+    List<String> sourceTensors = block.source_tensors;
+    for (var tensor in sourceTensors) {
+      if (!outputs.containsKey(tensor)) {
         if (kDebugMode) {
-            debugPrint("Raw input type match expected type. Proceeding with preprocessing.");
-            }
-        break;
-      case 'text':
-        if (rawInput is! String) {
-          if (kDebugMode) {
-            debugPrint("Raw input type: $rawInput.rawInput.runtimeType.toString()");
-            throw ArgumentError("This preprocessing block expects text, but raw input is not a String. Aborting preprocessing.");
+            debugPrint("Output map does not contain source tensor: $tensor. Aborting postprocessing and returning final results map.");
           }
-          return rawInput;
-        }
-        if (kDebugMode) {
-            debugPrint("Raw input type match expected type. Proceeding with preprocessing.");
-        }
-        break;
-      case 'audio':
-        if (rawInput is! Uint8List) {
-          if (kDebugMode) {
-            debugPrint("Raw input type: $rawInput.rawInput.runtimeType.toString()");
-            throw ArgumentError("This preprocessing block expects a audio, but raw input is not a Uint8List type. Aborting preprocessing.");
-          }
-          return rawInput;
-        }
-        if (kDebugMode) {
-            debugPrint("Raw input type match expected type. Proceeding with preprocessing.");
-        }
-        break;
-      // Add cases for other expected raw input types ('tensor', 'generic_list', etc.)
-      default:
-        throw UnimplementedError("Unsupported 'expects_type' in pipeline: $_expectedType");
+        return finalResults;
       }
+    }
 
-      // now that input is validated, start tracking the input with a variable
-      dynamic currentInput;
+    // declare a variable to track the current output
+    dynamic currentResult;
 
-      // start looping through the preprocessing steps
-      for (var preStep in modelPipeline!.preprocessing[_preprocessBlockIndex].steps) {
-        currentInput = await _performPreprocessingStep(currentInput, preStep, _preprocessBlockIndex);
+    // start looping through the postprocessing steps
+    for (var postStep in block.steps) {
+      currentResult = await _performPostprocessingStep(currentResult, rawOutputs, postStep);
+      if (currentResult == null && postStep != block.steps.last) {
+        throw Exception("Postprocessing block '$outputName', step '${postStep.step}' failed or returned null unexpectedly.");
       }
+    }
 
-      // return final input tensor
-      return currentInput;
+    // add postprocessed result to the final results map
+    finalResults[modelPipeline!.postprocessing[postprocessBlockIndex].output_name] = (currentResult);
+
+    // return final output map
+    return finalResults;
   }
-
 
 
   // execute a preprocessing step, given the step and the input data
@@ -462,10 +410,10 @@ class InferenceObject {
   // order of inferenceInputs will be mapped directly to the order of the pipeline inputs, so they must match
   // on the Flutter screen implementation
   // inferenceInputs is map keyed by the input name, so that the given input
-  Future<void> _performInference(Map<String, dynamic> inferenceInputs, Pipeline pipeline) async {
+  Future<dynamic> _performInference(Map<String, dynamic> inferenceInputs, Pipeline pipeline) async {
     // check that the inputs provided match the inputs expected based on the pipeline file
     if (inferenceInputs.length != pipeline.inputs.length) {
-      throw ArgumentError("Provided number of inputs (${inferenceInputs.length}) and expected number of inputs ($pipeline.inputs.length}) do not match, cannot proceed with inference.")
+      throw ArgumentError("Provided number of inputs (${inferenceInputs.length}) and expected number of inputs ($pipeline.inputs.length}) do not match, cannot proceed with inference.");
     }
 
     // preprocess inputs and construct the final input list for inference
@@ -494,27 +442,126 @@ class InferenceObject {
       debugPrint("Running inference on model.");
     }
     _interpreter?.runForMultipleInputs(processedInputs, outputBuffers);
+
+    // convert outputBuffers map to a String-keyed map using the output tensor names
+    Map<String, dynamic> inferenceOutputs = {};
+    for (int i=0; i < outputBuffers.length; i++) {
+      inferenceOutputs[pipeline.outputs[i].name] = outputBuffers[i];
+      }
+
+    // define the final results map, which will contain the final output from the model inference
+    // the map is keyed by each postprocessing block's name and final output
+    Map<String, dynamic> finalResults = {};
+
+    // check if any postprocessing blocks exist
+    if (pipeline.postprocessing.isNotEmpty) {
+      // loop through the postprocessing blocks and run the postprocess method
+      for (int i = 0; i < pipeline.postprocessing.length; i++) {
+        finalResults = await postprocess(inferenceOutputs, i, finalResults);
+        if (kDebugMode) {
+          debugPrint("Postprocessing block ${pipeline.postprocessing[i].output_name} completed.");
+        }
+      }
+    }
+    else {
+      if (kDebugMode) {
+        debugPrint("No postprocessing blocks found in pipeline, returning raw output.");
+      }
+      finalResults = inferenceOutputs;
+    }
+    
+    // return the final results map
+    return finalResults;
   }
 
 
   // helper method to create an output buffer, given an output shape and data type
-dynamic _createOutputBuffer(List<int> shape, String dtype) {
-  int totalElements = shape.reduce((a, b) => a* b);
-  switch (dtype.toLowerCase()) {
-    case 'float32':
-      return List.filled(totalElements, 0.0).reshape(shape);
-    case 'uint8':
-      return List.filled(totalElements, 0).reshape(shape);
-    default:
-      throw Exception("Unsupported output dtype: $dtype");
+  dynamic _createOutputBuffer(List<int> shape, String dtype) {
+    int totalElements = shape.reduce((a, b) => a* b);
+    switch (dtype.toLowerCase()) {
+      case 'float32':
+        return List.filled(totalElements, 0.0).reshape(shape);
+      case 'uint8':
+        return List.filled(totalElements, 0).reshape(shape);
+      default:
+        throw Exception("Unsupported output dtype: $dtype");
+    }
   }
-}
 
 
   // perform a postprocessing step, given a postprocessing block step object
-  Future<dynamic> _performPostprocessingStep(dynamic outputData, ProcessingStep step, )
+  Future<dynamic> _performPostprocessingStep(dynamic processedOutput, Map<String, dynamic> outputTensors, ProcessingStep step) async {
+    if (kDebugMode) {
+      debugPrint("Executing postprocessing step: ${step.step}");
+    }
+
+    switch (step.step) {
+      // applies an activation function to a list of values
+      case 'apply_activation':
+        // check that the current processed data is a List
+        if (processedOutput is! List) {
+          throw FormatException("Processed output is not a List, cannot apply activation function.");
+        }
+        // run activation function on input data based on function name
+        String function = step.params["function"];
+        switch (function) {
+          case 'softmax':
+            processedOutput = applySoftmax(processedOutput);
+          //case 'sigmoid':
+          //  return processedOutput.map((x) => 1 / (1 + Math.exp(-x))).toList();
+          //case 'relu':
+          //  return processedOutput.map((x) => x < 0 ? 0 : x).toList();
+          default:
+            if (kDebugMode) {
+              debugPrint("Warning: Unsupported activation function: $function, returning input data unchanged."); 
+            }
+        }
+      // map raw or activated outputs to a set of labels for classification
+      case 'map_labels':
+        // check that the processed output is a list of floats
+        if (processedOutput is! List) {
+          throw FormatException("Processed output is not a List, cannot map to classification labels.");
+        }
+        // load labels into memory
+        try {
+          final classificationLabels = await rootBundle.loadString(step.params['labels_url']);
+          _labels = classificationLabels.split('\n').map((label) => label.trim()).where((label) => label.isNotEmpty).toList();
+          if (kDebugMode) {
+            debugPrint("Successfully loaded ${_labels?.length} labels.");
+          }
+        }
+        catch (e) {
+          throw Exception("Failed fetching classification labels from $step.params['labels_url']: $e");
+        }
+        // create recognitions, which is a list of labels mapped to a value in the raw output tensor
+        List<Map<String, dynamic>> recognitions = [];
+        for (int i=0; i<processedOutput.length; i++) {
+          recognitions.add({
+            "index": i,
+            "label": _labels![i],
+            "confidence": processedOutput[i],
+          });
+        }
+        // set the processed output to the recognition list
+        processedOutput = recognitions;
+
+      default:
+        if (kDebugMode) {
+          debugPrint("Warning: Unsupported postprocessing step: ${step.step}"); 
+        }
+    }
+
+    return processedOutput;
+  }
 
 
+  // apply the softmax function on a given list of floats
+  List<dynamic> applySoftmax(List<dynamic> raw_inputs) {
+    double max_input = raw_inputs.reduce((a,b) => a > b ? a : b);
+    List<double> exps = raw_inputs.map((input) => Math.exp(input - max_input)).toList();
+    double sumExps = exps.reduce((a, b) => a + b);
+    return exps.map((exp) => exp / sumExps).toList();
+  }
 
 
   // helper method to check if a shape is NHWC

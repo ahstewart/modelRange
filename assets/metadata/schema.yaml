@@ -1,0 +1,110 @@
+{
+    "schema_version": "1.0.0", // Version of this schema definition
+    "model_name": "Example Model Name", // User-friendly display name
+    "model_version": "v1.1", // Specific version of this model asset
+    "model_task": "image_classification", // High-level task hint (e.g., "object_detection", "text_generation")
+    "framework": "tflite", // ML framework ('tflite', 'onnx', etc.)
+    "source_repository": "Optional URL to original model source (e.g., Hugging Face Hub)",
+  
+    // --- Model Signature ---
+    "inputs": [ // List describing each input tensor the model expects
+      {
+        "name": "input_tensor_name_1", // Name used within the model file
+        "shape": [1, 224, 224, 3], // Expected shape [Batch, H, W, C] or [B, C, H, W] etc. Use -1 for dynamic.
+        "dtype": "float32" // Expected data type ("float32", "uint8", "int32", etc.)
+      }
+      // Add more objects for multi-input models
+    ],
+    "outputs": [ // List describing each output tensor the model produces
+      {
+        "name": "output_tensor_name_1", // Name used within the model file
+        "shape": [1, 1001], // Expected shape
+        "dtype": "float32" // Expected data type
+      }
+      // Add more objects for multi-output models
+    ],
+  
+    // --- Preprocessing Pipeline ---
+    // List of blocks, each defining processing for one specific input tensor
+    "preprocessing": [
+      {
+        "input_name": "input_tensor_name_1", // Links this block to an input tensor defined above
+        "expects_type": "image", // Hint for the app about raw input ('image', 'text', 'audio_bytes', 'tensor')
+        "steps": [ // Ordered list of processing steps
+          {
+            "step": "resize_image", // Specific step name for image resizing
+            "params": {
+              "height": 224,
+              "width": 224,
+              "method": "bilinear" // e.g., "nearest"
+            }
+          },
+          {
+            "step": "normalize",
+            "params": {
+              // Method determines required params and behavior
+              "method": "mean_stddev", // Implies per-channel, expects array params
+              "mean": [0.485, 0.456, 0.406], // Array length must match channels
+              "stddev": [0.229, 0.224, 0.225]
+              // --- OR ---
+              // "method": "normalize_uniform", // Implies single value applied to all channels
+              // "mean": 127.5,
+              // "stddev": 127.5
+              // --- OR ---
+              // "method": "scale_div", // Implies simple division
+              // "value": 255.0
+            }
+          },
+          {
+            "step": "format", // Ensures final tensor state before inference
+            "params": {
+              "target_dtype": "float32", // Must match corresponding "inputs" dtype
+              "color_space": "RGB", // e.g., "Grayscale". Must match normalization if per-channel.
+              "data_layout": "NHWC" // e.g., "NCHW". Must match model expectation.
+            }
+          }
+          // Add other steps like 'tokenize' for text, 'extract_features' for audio etc.
+        ]
+      }
+      // Add more blocks for multi-input models, linking via "input_name"
+    ],
+  
+    // --- Postprocessing Pipeline ---
+    // List of blocks, each defining one logical output result derived from raw model outputs
+    "postprocessing": [
+      {
+        // Name for this specific processed output (used as key in results map)
+        "output_name": "classification_result", // e.g., "detection_result", "generated_text"
+        // Semantic meaning of this output block, guides final result wrapping (Sealed Class)
+        "interpretation": "classification_logits", // e.g., "detection_boxes_scores_classes", "text_generation", "segmentation_mask"
+        // List of raw output tensor names (from "outputs" section) needed by steps in this block
+        "source_tensors": ["output_tensor_name_1"],
+        // Optional: Extra info specific to interpretation (e.g., coordinate format for detection)
+        // "coordinate_format": "normalized_ymin_xmin_ymax_xmax",
+        "steps": [ // Ordered list of processing steps
+          {
+            "step": "apply_activation", // e.g., Softmax, Sigmoid, ArgMax
+            "params": {
+              "function": "softmax",
+              "tensor_name": "output_tensor_name_1" // Optional: Specify tensor if ambiguous
+            }
+          },
+          {
+            "step": "map_labels",
+            "params": {
+              "labels_url": "assets/labels.txt", // Path or URL to label file
+              // Optional: Explicitly name the tensor providing class indices/scores if ambiguous
+              // "class_tensor": "output_tensor_name_1",
+              "top_k": 3 // Optional: How many results to return
+            }
+          }
+          // Add other steps like 'filter_by_score', 'decode_boxes', 'apply_nms', 'decode_tokens' etc.
+          // Remember steps can use params to specify which tensor from 'source_tensors' they need,
+          // e.g., "score_tensor": "detection_scores"
+        ]
+      }
+      // Add more blocks for multi-task models or multiple interpretations,
+      // each with a unique "output_name" and its own "interpretation", "source_tensors", and "steps".
+    ]
+  }
+  
