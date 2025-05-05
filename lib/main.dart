@@ -4,6 +4,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 //import 'package:flutter/foundation.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 import 'widgets/image_classification.dart';
+import 'inference/pipeline.dart';
+import 'data_models/data_models.dart';
+import 'package:yaml/yaml.dart';
+import 'dart:convert';
+
 
 // optional: Since our Person class is serializable, we must add this line.
 // But if Person was not serializable, we could skip it.
@@ -158,9 +163,20 @@ class Models extends ConsumerWidget {
 }
 
 
+
 // widget for the model range
 class ModelRange extends ConsumerWidget {
   const ModelRange({super.key});
+
+  dynamic _convertYamlToJson(dynamic yaml) {
+    if (yaml is YamlMap) {
+      return yaml.map((k, v) => MapEntry(k.toString(), _convertYamlToJson(v)));
+    }
+    if (yaml is YamlList) {
+      return yaml.map((e) => _convertYamlToJson(e)).toList();
+    }
+    return yaml;
+  }
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -172,9 +188,12 @@ class ModelRange extends ConsumerWidget {
     }
 
     // check if the selected model is the one we've built inference for
-    else if (selectedModel.name == "byoussef/MobileNetV4_Conv_Small_TFLite_224") {
-      return const ImageClassificationWidget();
-    }
+    /*else if (selectedModel.name == "byoussef/MobileNetV4_Conv_Small_TFLite_224") {
+      String metadataPath = 'assets/mobilenet_imageclass.yaml';
+      final yamlMap = loadYaml(metadataPath);
+      final jsonMap = _convertYamlToJson(yamlMap);
+      return ImageClassificationWidget(metadata: {jsonMap},);
+    }*/
     
     //if model has been selected, show the model range
     return Column(

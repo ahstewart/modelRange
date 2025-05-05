@@ -475,6 +475,17 @@ class InferenceObject {
   }
 
 
+  // method to dispose of the inference objects from memory
+  void dispose() {
+    _interpreter?.close(); 
+    _interpreter = null; 
+    modelPipeline = null;
+    if (kDebugMode) {
+      debugPrint("Inference Object disposed.");
+    }
+  }
+
+
   // helper method to create an output buffer, given an output shape and data type
   dynamic _createOutputBuffer(List<int> shape, String dtype) {
     int totalElements = shape.reduce((a, b) => a* b);
