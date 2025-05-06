@@ -9,55 +9,72 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:image_picker/image_picker.dart';
 import 'package:image/image.dart' as img;
+import 'package:model_range/inference/pipeline_schema.txt';
 import 'package:tflite_flutter/tflite_flutter.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
+import '../inference/pipeline.dart';
  
 
-// we'll focus first on a well-defined TFLite model, MobileNetV4_Conv_Small_TFLite_224, which handles image classification
-/* To implement this, we'll need to build the following
-- install TFLite model in assets directory to start
-- fetch model and load it into memory (hard coded)
-- initialize interpreter and all that
-- define inference steps
-- build inference pipeline
-- create UI to facilitate model selection and model inference
-*/
-
-var modelName = 'assets/mobilenetv4_conv_small.e2400_r224_in1k_float32.tflite';
+// file purpose: this is the main widget for image classification, it will facilitate the capturing of images and running the inference of a model
+// on the captured image. The widget will also display the results of the inference.
+var modelNameReal = 'assets/mobilenetv4_conv_small.e2400_r224_in1k_float32.tflite';
+var pipelinePathReal = 'assets/metadata/mobilenet_imageclass.yaml';
 var labelName = 'assets/imagenet_classes.txt';
 
 
 // to generalize the image classification task, we need the image classification widget to accept the model metadata 
 
 class ImageClassificationWidget extends ConsumerStatefulWidget {
-  final Map metadata;
-  const ImageClassificationWidget({super.key, required this.metadata,});
+  final String pipelinePath;
+  final String modelName;
+  
+  const ImageClassificationWidget({
+    super.key, 
+    required this.modelName,
+    required this.pipelinePath,
+  });
 
   @override
   ConsumerState<ImageClassificationWidget> createState() => _ImageClassificationWidgetState();
 }
 
 class _ImageClassificationWidgetState extends ConsumerState<ImageClassificationWidget> {
-
+/*
   // initialize interpreter, labels, etc
   Interpreter? _interpreter;
   List<String>? _labels;
-  bool _isLoading = false;
-  File? _selectedImage;
-  List<dynamic>? _recognitions;
 
   // preprocessing configs
   final int _inputWidth = 224;
   final int _inputHeight = 224;
   final double _mean = 127.5;
   final double _std = 127.5;
+*/
 
+  // instantiate the model inference object
+  late final InferenceObject inferenceObject;
+  bool _isLoading = false;
+  File? _selectedImage;
+  List<dynamic>? _recognitions;
+  // define the input map
+  Map<String, dynamic> inputMap = {};
+  // define the final inference results map
+  Map<String, dynamic> inferenceResults = {};
 
   @override
   void initState() {
     super.initState();
+    inferenceObject = InferenceObject(
+      modelPath: widget.modelName,
+      pipelinePath: widget.pipelinePath
+    );
+    if (kDebugMode) {
+      debugPrint("Initializing Image Classification Widget");
+    }
+  }
+    /*
     // initialize model interpreter based on "framework" parameter in model metadata
     // valid vaLues are "tflite", 
     if (widget.metadata['framework'] == "tflite") {
@@ -79,13 +96,14 @@ class _ImageClassificationWidgetState extends ConsumerState<ImageClassificationW
     }
     
   }
+*/
 
   @override dispose() {
-    _interpreter?.close();
+    inferenceObject.dispose();
     super.dispose();
   }
 
-
+/*
     // method to traverse the metadata Map to fetch the label path (label_url)
   String getLabelPath(Map metadata) {
    try {
@@ -152,6 +170,8 @@ class _ImageClassificationWidgetState extends ConsumerState<ImageClassificationW
     return exps.map((exp) => exp / sumExps).toList();
   }
 
+*/
+
 // enable the selection of images
   Future<void> _pickImage(ImageSource source) async {
     if (_isLoading) return; // can't pick an image if inference is currently happening
@@ -166,9 +186,6 @@ class _ImageClassificationWidgetState extends ConsumerState<ImageClassificationW
         _selectedImage = File(image.path);
         _recognitions = null;
       });
-    
-      // run inference on selected image
-      await _runInference(_selectedImage!);
     }
 
     catch (e) {
@@ -177,14 +194,55 @@ class _ImageClassificationWidgetState extends ConsumerState<ImageClassificationW
       }
     }
 
+    // run inference on the selected image
+    try {
+      // check that the inference object is initialized and ready
+      if (!inferenceObject.isReady) {
+        if (kDebugMode) {
+          debugPrint("Could not run inference on image, interpreter or labels haven't been loaded.");
+        }
+        return;
+      }
+
+      setState(() {
+        _isLoading = true;
+      });
+
+      // create input data map, keyed by input name
+      for (input in inferenceObject.modelPipeline!.inputs) {
+        inputMap[input.input_name] = _selectedImage;
+      }
+
+      // run inference on selected image
+      inferenceResults = await inferenceObject.performInference(inputMap);
+    }
+
+    catch (e) {
+      if (kDebugMode) {
+        debugPrint("Error running inference: $e");
+      }
+      setState(() {
+        _recognitions = [{"label": "Error", "confidence": "Could not get confidence"}];
+      });
+    }
+
+    finally {
+      setState(() {
+        _isLoading = false;
+      });
+    }
+
+    // use the inference results to update the UI
+    List<Map<String, dynamic>> recongnitions = inferenceResults.values.first;
+    // reorder the final recognitions by highest probability first
+    recongnitions.sort((a,b) => (b['confidence'] as double).compareTo(a['confidence'] as double));
+
+    setState(() {
+      _recognitions = recongnitions;
+    });
   }
 
-  img.Image imagePreProcessing(Map metadata) {
-    final preprocessing_steps = metadata['preprocessing'];
-
-    
-  }
-
+/*
   // run inference on image
   Future<void> _runInference(File imageFile) async {
     if (_interpreter == null || _labels == null) {
@@ -266,6 +324,7 @@ class _ImageClassificationWidgetState extends ConsumerState<ImageClassificationW
       });
     }
   }
+*/
 
   @override
   Widget build(BuildContext context) {
@@ -356,7 +415,5 @@ class _ImageClassificationWidgetState extends ConsumerState<ImageClassificationW
       ),
     );
   }
-
-}
-
+ }
   

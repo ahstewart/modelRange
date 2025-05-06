@@ -20,13 +20,10 @@ import 'package:yaml/yaml.dart';
 class InferenceObject {
   // initialize interpreter, pipeline (metadata), etc
   Interpreter? _interpreter;
-  bool get isReady => _interpreter != null && modelPipeline != null;
   Pipeline? modelPipeline;
 
   List<String>? _labels;
-  bool _isLoading = false;
-  File? _selectedImage;
-  List<dynamic>? _recognitions;
+  bool get isReady => _interpreter != null && modelPipeline != null;
 
   final String modelPath;
   final String pipelinePath;
@@ -34,7 +31,9 @@ class InferenceObject {
   InferenceObject({
     required this.modelPath,
     required this.pipelinePath,
-  }) {
+  }) 
+  
+  {
     loadModel(modelPath);
     loadPipeline(pipelinePath);
   }
@@ -410,10 +409,10 @@ class InferenceObject {
   // order of inferenceInputs will be mapped directly to the order of the pipeline inputs, so they must match
   // on the Flutter screen implementation
   // inferenceInputs is map keyed by the input name, so that the given input
-  Future<dynamic> _performInference(Map<String, dynamic> inferenceInputs, Pipeline pipeline) async {
+  Future<dynamic> performInference(Map<String, dynamic> inferenceInputs) async {
     // check that the inputs provided match the inputs expected based on the pipeline file
-    if (inferenceInputs.length != pipeline.inputs.length) {
-      throw ArgumentError("Provided number of inputs (${inferenceInputs.length}) and expected number of inputs ($pipeline.inputs.length}) do not match, cannot proceed with inference.");
+    if (inferenceInputs.length != modelPipeline!.inputs.length) {
+      throw ArgumentError("Provided number of inputs (${inferenceInputs.length}) and expected number of inputs ($modelPipeline!.inputs.length}) do not match, cannot proceed with inference.");
     }
 
     // preprocess inputs and construct the final input list for inference
@@ -421,7 +420,7 @@ class InferenceObject {
     for (var input in inferenceInputs.entries) {
       var tempInput = input.value;
       // check if a preprocessing step exists for the given input
-      for (var preprocessBlock in pipeline.preprocessing) {
+      for (var preprocessBlock in modelPipeline!.preprocessing) {
         if (input.key == preprocessBlock.input_name) {
           tempInput = await preprocess(input.value, input.key);
         }
@@ -433,7 +432,7 @@ class InferenceObject {
 
     // create ouput buffers
     Map<int, Object> outputBuffers = {};
-    List<IO> outputs = pipeline.outputs;
+    List<IO> outputs = modelPipeline!.outputs;
     for (int i = 0; i < outputs.length; i++) {
       outputBuffers[i] = _createOutputBuffer(outputs[i].shape, outputs[i].dtype);
     }
@@ -446,7 +445,7 @@ class InferenceObject {
     // convert outputBuffers map to a String-keyed map using the output tensor names
     Map<String, dynamic> inferenceOutputs = {};
     for (int i=0; i < outputBuffers.length; i++) {
-      inferenceOutputs[pipeline.outputs[i].name] = outputBuffers[i];
+      inferenceOutputs[modelPipeline!.outputs[i].name] = outputBuffers[i];
       }
 
     // define the final results map, which will contain the final output from the model inference
@@ -454,12 +453,12 @@ class InferenceObject {
     Map<String, dynamic> finalResults = {};
 
     // check if any postprocessing blocks exist
-    if (pipeline.postprocessing.isNotEmpty) {
+    if (modelPipeline!.postprocessing.isNotEmpty) {
       // loop through the postprocessing blocks and run the postprocess method
-      for (int i = 0; i < pipeline.postprocessing.length; i++) {
+      for (int i = 0; i < modelPipeline!.postprocessing.length; i++) {
         finalResults = await postprocess(inferenceOutputs, i, finalResults);
         if (kDebugMode) {
-          debugPrint("Postprocessing block ${pipeline.postprocessing[i].output_name} completed.");
+          debugPrint("Postprocessing block ${modelPipeline!.postprocessing[i].output_name} completed.");
         }
       }
     }

@@ -69,7 +69,7 @@ class IO {
   // input/output fields in YAML
   @JsonKey(required: true)
   final String name;
-  @JsonKey(defaultValue: '')
+  @JsonKey(defaultValue: [])
   final List<int> shape;
   @JsonKey(required: true)
   final String dtype;

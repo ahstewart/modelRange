@@ -72,7 +72,11 @@ IO _$IOFromJson(Map<String, dynamic> json) {
   $checkKeys(json, requiredKeys: const ['name', 'dtype']);
   return IO(
     name: json['name'] as String,
-    shape: json['shape'] as String? ?? '',
+    shape:
+        (json['shape'] as List<dynamic>?)
+            ?.map((e) => (e as num).toInt())
+            .toList() ??
+        [],
     dtype: json['dtype'] as String,
     description: json['description'] as String? ?? '',
   );
