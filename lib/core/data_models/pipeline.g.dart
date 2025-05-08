@@ -1,6 +1,6 @@
 // GENERATED CODE - DO NOT MODIFY BY HAND
 
-part of 'data_models.dart';
+part of 'pipeline.dart';
 
 // **************************************************************************
 // JsonSerializableGenerator

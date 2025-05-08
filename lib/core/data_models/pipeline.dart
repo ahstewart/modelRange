@@ -5,7 +5,7 @@ import 'dart:async';
 import 'dart:io';
 import 'package:json_annotation/json_annotation.dart';
 
-part 'data_models.g.dart';
+part 'pipeline.g.dart';
 
 
 @JsonSerializable()

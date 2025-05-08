@@ -71,4 +71,4 @@ postprocessing:
           # Specify which tensor holds the scores/logits corresponding to labels
           class_tensor: output_1
           # Specify how many top results to return (matches Flutter code display)
-          top_k: 3
+          top_k: 7

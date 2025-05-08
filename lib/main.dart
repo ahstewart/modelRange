@@ -3,9 +3,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 //import 'package:freezed_annotation/freezed_annotation.dart';
 //import 'package:flutter/foundation.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
-import 'widgets/image_classification.dart';
-import 'inference/pipeline.dart';
-import 'data_models/data_models.dart';
+import 'features/image_classification/image_classification.dart';
+import 'core/services/inferenceService.dart';
+import 'core/data_models/pipeline.dart';
 import 'package:yaml/yaml.dart';
 import 'dart:convert';
 
@@ -25,33 +25,28 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Flutter Demo',
+      title: 'Pocket AI',
       theme: ThemeData(
+      primarySwatch: Colors.indigo,
+        visualDensity: VisualDensity.adaptivePlatformDensity,
         useMaterial3: true,
-        // This is the theme of your application.
-        //
-        // TRY THIS: Try running your application with "flutter run". You'll see
-        // the application has a purple toolbar. Then, without quitting the app,
-        // try changing the seedColor in the colorScheme below to Colors.green
-        // and then invoke "hot reload" (save your changes or press the "hot
-        // reload" button in a Flutter-supported IDE, or press "r" if you used
-        // the command line to start the app).
-        //
-        // Notice that the counter didn't reset back to zero; the application
-        // state is not lost during the reload. To reset the state, use hot
-        // restart instead.
-        //
-        // This works for code too, not just values: Most code changes can be
-        // tested with just a hot reload.
-        colorScheme: ColorScheme.fromSeed(seedColor: const Color.fromARGB(255, 148, 50, 12)),
+        colorScheme: ColorScheme.fromSeed(seedColor: const Color.fromARGB(255, 23, 148, 12)),
+        elevatedButtonTheme: ElevatedButtonThemeData(
+          style: ElevatedButton.styleFrom(
+            backgroundColor: Colors.indigo[700],
+            foregroundColor: Colors.white,
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+            textStyle: const TextStyle(fontSize: 16),
+          ),
+        ),
       ),
-      home: const ModelList(title: 'Model Range'),
+      home: const ModelList(title: 'Pocket AI'),
     );
   }
 }
 
-// a Model class using freezed
 
+// a Model class using freezed
 class Model {
   final dynamic name;
   final dynamic description;
@@ -142,22 +137,26 @@ class Models extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final modelList = ref.watch(modelProvider);
 
-    return GridView(gridDelegate: SliverGridDelegateWithMaxCrossAxisExtent(maxCrossAxisExtent: 400),
-              children:
-                [for (Model m in modelList)
-                  Card(
-                    child: ListTile(
-                      //selected: _selected,
-                      title: Text(m.name),
-                      subtitle: Text(m.pipelineTag),
-                      leading: Icon(Icons.image),
-                      onTap: () {
-                            ref.read(selectedModelProvider.notifier).state = m;
-                            ref.read(selectedIndexProvider.notifier).state = 1;
-                            }
-                    ),
-                  ),
-                ],
+    return Wrap(
+      spacing: 16.0,
+      runSpacing: 16.0,
+      children: [
+        for (Model m in modelList)
+          SizedBox(
+            width: 300, // Set a fixed width for each card to mimic grid tiles
+            child: Card(
+              child: ListTile(
+                title: Text(m.name),
+                subtitle: Text(m.pipelineTag),
+                leading: Icon(Icons.image),
+                onTap: () {
+                  ref.read(selectedModelProvider.notifier).state = m;
+                  ref.read(selectedIndexProvider.notifier).state = 1;
+                },
+              ),
+            ),
+          ),
+      ],
     );
   }
 }

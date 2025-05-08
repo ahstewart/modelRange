@@ -13,8 +13,8 @@ import 'package:tflite_flutter/tflite_flutter.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
-import '../inference/pipeline.dart';
-import '../data_models/data_models.dart';
+import '../../core/services/inferenceService.dart';
+import '../../core/data_models/pipeline.dart';
  
 
 // file purpose: this is the main widget for image classification, it will facilitate the capturing of images and running the inference of a model
@@ -41,18 +41,6 @@ class ImageClassificationWidget extends ConsumerStatefulWidget {
 }
 
 class _ImageClassificationWidgetState extends ConsumerState<ImageClassificationWidget> {
-/*
-  // initialize interpreter, labels, etc
-  Interpreter? _interpreter;
-  List<String>? _labels;
-
-  // preprocessing configs
-  final int _inputWidth = 224;
-  final int _inputHeight = 224;
-  final double _mean = 127.5;
-  final double _std = 127.5;
-*/
-
   // instantiate the model inference object
   late final InferenceObject inferenceObject;
   bool _isLoading = false;
@@ -63,6 +51,8 @@ class _ImageClassificationWidgetState extends ConsumerState<ImageClassificationW
   Map<String, dynamic> inputMap = {};
   // define the final inference results map
   Map<String, dynamic> inferenceResults = {};
+  // number of results displayed on the screen, default to 3
+  int numResults = 3;
 
   @override
   void initState() {
@@ -75,103 +65,13 @@ class _ImageClassificationWidgetState extends ConsumerState<ImageClassificationW
       debugPrint("Initializing Image Classification Widget");
     }
   }
-    /*
-    // initialize model interpreter based on "framework" parameter in model metadata
-    // valid vaLues are "tflite", 
-    if (widget.metadata['framework'] == "tflite") {
-      _initializeInterpreter(widget.metadata['source_repository']);
-    }
-    else {
-      if (kDebugMode) {
-        debugPrint("Error loading model: Invalid 'framework' parameter");
-      }
-    }
-    // load in labels using metadata
-    try {
-      _loadLabels(getLabelPath(widget.metadata));
-    }
-    catch (e) {
-      if (kDebugMode) {
-        debugPrint("Error loading labels: $e");
-      }
-    }
     
-  }
-*/
 
   @override dispose() {
     inferenceObject.dispose();
     super.dispose();
   }
 
-/*
-    // method to traverse the metadata Map to fetch the label path (label_url)
-  String getLabelPath(Map metadata) {
-   try {
-    final postprocessing = metadata['postprocessing'] as List;
-    for (var step in postprocessing) {
-      final steps = step['steps'] as List;
-      for (var substep in steps) {
-        if (substep['step'] == 'map_labels') {
-          return substep['params']['labels_url'] as String;
-        }
-      }
-    }
-      throw Exception("Could not find 'labels_url' in model metadata postprocessing step.");
-    }
-    catch (e) {
-    if (kDebugMode) {
-      debugPrint('Error getting label path: $e');
-    }
-    return "Error getting label URL";
-  }
-}
-
-
-  // create interpreter to load the model
-  Future<void> _initializeInterpreter(String modelPath) async {
-    final options = InterpreterOptions();
-
-    try {
-      _interpreter = await Interpreter.fromAsset(modelPath, options:options);
-
-      if (kDebugMode) {
-        debugPrint(_interpreter?.getInputTensors().toString());
-        debugPrint(_interpreter?.getOutputTensors().toString());
-      }
-    }
-    catch (e) {
-      if (kDebugMode) {
-        debugPrint("Failed to load model: $e");
-      }
-    }
-  }
-
-  // load classification labels
-  Future<void> _loadLabels(String labelPath) async {
-    try {
-      final classificationLabels = await rootBundle.loadString(labelPath);
-      _labels = classificationLabels.split('\n').map((label) => label.trim()).where((label) => label.isNotEmpty).toList();
-      if (kDebugMode) {
-        debugPrint("Successfully loaded ${_labels?.length} labels.");
-      }
-    }
-    catch (e) {
-      if (kDebugMode) {
-        debugPrint("Failed fetching classification labels: $e");
-      }
-    }
-  }
-
-  // apply the softmax function on a given list of floats
-  List<double> applySoftmax(List<double> raw_inputs) {
-    double max_input = raw_inputs.reduce((a,b) => a > b ? a : b);
-    List<double> exps = raw_inputs.map((input) => Math.exp(input - max_input)).toList();
-    double sumExps = exps.reduce((a, b) => a + b);
-    return exps.map((exp) => exp / sumExps).toList();
-  }
-
-*/
 
 // enable the selection of images
   Future<void> _pickImage(ImageSource source) async {
@@ -253,91 +153,25 @@ class _ImageClassificationWidgetState extends ConsumerState<ImageClassificationW
         _recognitions = [{"label": "Error running model", "confidence": 0.0}];
       });
     }
-  }
 
-/*
-  // run inference on image
-  Future<void> _runInference(File imageFile) async {
-    if (_interpreter == null || _labels == null) {
-      if (kDebugMode) {
-        debugPrint("Could not run inference on image, interpreter or labels haven't been loaded.");
-      }
-      return;
-    }
-
-    setState(() {
-      _isLoading = true;
-    });
-
+    // try to set the numResults to a custom value, if it's included in the pipeline YAML
+    debugPrint("Trying to set the numResults to a custom value, if it's included in the pipeline YAML.");
     try {
-      // prep image - Preprocessing
-      // load image into memory
-      img.Image? image = img.decodeImage(await imageFile.readAsBytes());
-      if (image == null) throw Exception("Could not decode image");
-      // resize image to sizes defined in the model metadata schema (MMS)
-      
-      img.Image resizedImage = img.copyResize(image, width: _inputWidth, height: _inputHeight);
-      // normalize image values around mean and std defined in the MMS
-      var imageBytes = resizedImage.getBytes(order: img.ChannelOrder.rgb);
-      var inputBytes = Float32List(_inputHeight * _inputWidth * 3);
-      // var inputIndex = 0;
-      for (int i = 0; i <imageBytes.length; i +=3) {
-        inputBytes[i] = (imageBytes[i] - _mean) / _std;
-        inputBytes[i+1] = (imageBytes[i+1] - _mean) / _std;
-        inputBytes[i+2] = (imageBytes[i+2] - _mean) / _std;
+      // look for posprocessing block with a map_labels step
+      for (ProcessingBlock block in inferenceObject.modelPipeline!.postprocessing) {
+        for (ProcessingStep step in block.steps) {
+          if (step.step == 'map_labels') {
+            numResults = step.params['top_k'];
+          }
+        }
       }
-      // reshape normalized image
-      final input = inputBytes.reshape([1, _inputWidth, _inputHeight, 3]);
-
-      // define output tensor
-      final outputShape = [1, _labels!.length]; // assuming the output tensor matches the list of labels
-      final output = List.filled(outputShape.reduce((a,b) => a*b), 0.0).reshape(outputShape);
-
-      // using the TFLite interpreter, run the inference
-      _interpreter!.run(input, output);
-
-      // postprocessing, understand the outputted results and display them
-      final List<double> outputScores = output[0] as List<double>;
-
-      // apply softmax to recognitions
-      final List<double> outputScores_softmax = applySoftmax(outputScores);
-
-      // create map of labels: probabilities (will softmax later)
-      List<Map<String, dynamic>> recongnitions = [];
-      for (int i=0; i<outputScores_softmax.length; i++) {
-        recongnitions.add({
-          "index": i,
-          "label": _labels![i],
-          "confidence": outputScores_softmax[i],
-        });
-      }
-
-      // reorder the final recognitions by highest probability first
-      recongnitions.sort((a,b) => (b['confidence'] as double).compareTo(a['confidence'] as double));
-
-      setState(() {
-        _recognitions = recongnitions;
-      });
-
-
-    }
-
+    } 
     catch (e) {
-      if (kDebugMode) {
-        debugPrint("Image classification inference failed: $e");
-      }
-      setState(() {
-        _recognitions = [{"label": "Error", "confidence": "Could not get confidence"}];
-      });
+      debugPrint("Error setting numResults, maybe it's not in the pipeline YAML. Using default value of 3.");
     }
 
-    finally {
-      setState(() {
-        _isLoading = false;
-      });
-    }
   }
-*/
+
 
   @override
   Widget build(BuildContext context) {
@@ -411,7 +245,7 @@ class _ImageClassificationWidgetState extends ConsumerState<ImageClassificationW
                               ),
                               const SizedBox(height: 10),
                               // Display top 3 results (or fewer if less results)
-                              ..._recognitions!.take(3).map((rec) {
+                              ..._recognitions!.take(numResults).map((rec) {
                                 return Text(
                                   '${rec['label']} (${(rec['confidence'] * 100).toStringAsFixed(1)}%)',
                                   style: const TextStyle(fontSize: 16),
