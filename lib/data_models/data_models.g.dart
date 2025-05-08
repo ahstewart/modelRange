@@ -89,23 +89,23 @@ Map<String, dynamic> _$IOToJson(IO instance) => <String, dynamic>{
   'description': instance.description,
 };
 
-ProcessingBlock _$ProcessingBlockFromJson(Map<String, dynamic> json) {
-  $checkKeys(json, requiredKeys: const ['source_tensors']);
-  return ProcessingBlock(
-    input_name: json['input_name'] as String? ?? '',
-    output_name: json['output_name'] as String? ?? '',
-    expects_type: json['expects_type'] as String? ?? '',
-    interpretation: json['interpretation'] as String? ?? '',
-    source_tensors:
-        (json['source_tensors'] as List<dynamic>)
-            .map((e) => e as String)
-            .toList(),
-    steps:
-        (json['steps'] as List<dynamic>)
-            .map((e) => ProcessingStep.fromJson(e as Map<String, dynamic>))
-            .toList(),
-  );
-}
+ProcessingBlock _$ProcessingBlockFromJson(Map<String, dynamic> json) =>
+    ProcessingBlock(
+      input_name: json['input_name'] as String? ?? '',
+      output_name: json['output_name'] as String? ?? '',
+      expects_type: json['expects_type'] as String? ?? '',
+      interpretation: json['interpretation'] as String? ?? '',
+      source_tensors:
+          (json['source_tensors'] as List<dynamic>?)
+              ?.map((e) => e as String)
+              .toList() ??
+          [],
+      steps:
+          (json['steps'] as List<dynamic>?)
+              ?.map((e) => ProcessingStep.fromJson(e as Map<String, dynamic>))
+              .toList() ??
+          [],
+    );
 
 Map<String, dynamic> _$ProcessingBlockToJson(ProcessingBlock instance) =>
     <String, dynamic>{

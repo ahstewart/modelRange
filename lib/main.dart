@@ -188,12 +188,16 @@ class ModelRange extends ConsumerWidget {
     }
 
     // check if the selected model is the one we've built inference for
-    /*else if (selectedModel.name == "byoussef/MobileNetV4_Conv_Small_TFLite_224") {
+    else if (selectedModel.name == "byoussef/MobileNetV4_Conv_Small_TFLite_224") {
       String metadataPath = 'assets/mobilenet_imageclass.yaml';
-      final yamlMap = loadYaml(metadataPath);
-      final jsonMap = _convertYamlToJson(yamlMap);
-      return ImageClassificationWidget(metadata: {jsonMap},);
-    }*/
+      String modelPath = 'assets/mobilenetv4_conv_small.e2400_r224_in1k_float32.tflite';
+      //final yamlMap = loadYaml(metadataPath);
+      //final jsonMap = _convertYamlToJson(yamlMap);
+      return ImageClassificationWidget(
+        modelName: modelPath,
+        pipelinePath: metadataPath,
+      );
+    }
     
     //if model has been selected, show the model range
     return Column(

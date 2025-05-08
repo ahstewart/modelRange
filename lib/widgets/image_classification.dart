@@ -9,12 +9,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:image_picker/image_picker.dart';
 import 'package:image/image.dart' as img;
-import 'package:model_range/inference/pipeline_schema.txt';
 import 'package:tflite_flutter/tflite_flutter.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 import '../inference/pipeline.dart';
+import '../data_models/data_models.dart';
  
 
 // file purpose: this is the main widget for image classification, it will facilitate the capturing of images and running the inference of a model
@@ -57,6 +57,7 @@ class _ImageClassificationWidgetState extends ConsumerState<ImageClassificationW
   late final InferenceObject inferenceObject;
   bool _isLoading = false;
   File? _selectedImage;
+  img.Image? _decodedImage;
   List<dynamic>? _recognitions;
   // define the input map
   Map<String, dynamic> inputMap = {};
@@ -177,13 +178,16 @@ class _ImageClassificationWidgetState extends ConsumerState<ImageClassificationW
     if (_isLoading) return; // can't pick an image if inference is currently happening
 
     try {
+      debugPrint("Picking image...");
       final ImagePicker picker = ImagePicker();
       final XFile? image = await picker.pickImage(source: source);
-
-      if (image == null) return;
+      debugPrint("Image picked.");
+      debugPrint("Decoding image so it can fed into model...");
+      File imageFile = File(image!.path);
+      _decodedImage = img.decodeImage(await imageFile.readAsBytes());
 
       setState(() {
-        _selectedImage = File(image.path);
+        _selectedImage = imageFile;
         _recognitions = null;
       });
     }
@@ -209,8 +213,8 @@ class _ImageClassificationWidgetState extends ConsumerState<ImageClassificationW
       });
 
       // create input data map, keyed by input name
-      for (input in inferenceObject.modelPipeline!.inputs) {
-        inputMap[input.input_name] = _selectedImage;
+      for (var input in inferenceObject.modelPipeline!.inputs) {
+        inputMap[input.name] = _decodedImage;
       }
 
       // run inference on selected image
@@ -232,14 +236,23 @@ class _ImageClassificationWidgetState extends ConsumerState<ImageClassificationW
       });
     }
 
-    // use the inference results to update the UI
-    List<Map<String, dynamic>> recongnitions = inferenceResults.values.first;
-    // reorder the final recognitions by highest probability first
-    recongnitions.sort((a,b) => (b['confidence'] as double).compareTo(a['confidence'] as double));
+    // check that the inference resulted in actual outputs
+    if (inferenceResults.isNotEmpty && inferenceResults.values.first != null) {
+      // use the inference results to update the UI
+      List<Map<String, dynamic>> recongnitions = inferenceResults.values.first;
+      // reorder the final recognitions by highest probability first
+      recongnitions.removeWhere((r) => r['confidence'] == null);
+      recongnitions.sort((a,b) => (b['confidence'] as double).compareTo(a['confidence'] as double));
 
-    setState(() {
-      _recognitions = recongnitions;
-    });
+      setState(() {
+        _recognitions = recongnitions;
+      });
+    }
+    else {
+      setState(() {
+        _recognitions = [{"label": "Error running model", "confidence": 0.0}];
+      });
+    }
   }
 
 /*

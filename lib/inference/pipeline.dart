@@ -7,13 +7,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:image_picker/image_picker.dart';
 import 'package:image/image.dart' as img;
-import 'package:model_range/inference/pipeline_schema.txt';
 import 'package:tflite_flutter/tflite_flutter.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 import '../data_models/data_models.dart';
 import 'package:yaml/yaml.dart';
+import '../core/utils/list_extensions.dart';
 
 
 // inference object that contains methods for loading models, pre and post processing, and running the actual inference
@@ -61,8 +61,12 @@ class InferenceObject {
 
   // load pipeline from a pipeline_path, using the pipeline data model
   Future<void> loadPipeline(String pipelinePath) async {
+    if (kDebugMode) {
+      debugPrint("Loading model pipeline file...");
+    }
+
     // get string from pipeline file
-    String pipelineContents = await File(pipelinePath).readAsString();
+    String pipelineContents = await rootBundle.loadString(pipelinePath);
     // parse the string using the yaml package and return the parsed map
     YamlMap pipelineYamlMap = loadYaml(pipelineContents);
     // convert YAML map to Map<String, 
@@ -70,14 +74,25 @@ class InferenceObject {
 
     // create pipeline object from pipeline_map
     modelPipeline = Pipeline.fromJson(pipelineMap);
+
+    if (kDebugMode) {
+      debugPrint("Model pipeline file loaded successfully.");
+    }
   }
 
   // helper method for converting YAML map to JSON
-  Map<String, dynamic> _convertYamlToJson(YamlMap yaml) {
-      return yaml.map((key, value) => MapEntry(
-        key.toString(), 
-        value is YamlMap ? _convertYamlToJson(value) : value,
-      ));
+  dynamic _convertYamlToJson(dynamic yaml) {
+    if (yaml is YamlMap) {
+      return Map<String, dynamic>.fromEntries(
+        yaml.entries.map(
+          (e) => MapEntry(e.key.toString(), _convertYamlToJson(e.value)),
+        ),
+      );
+    }
+    if (yaml is YamlList) {
+      return yaml.map(_convertYamlToJson).toList();
+    }
+    return yaml;
   }
   
   // the inference object needs to handle the preprocessing, inference, and postprocessing phase
@@ -98,20 +113,24 @@ class InferenceObject {
           }
       return rawInput;
     }
+
+    debugPrint("Starting preprocessing...");
     // if preprocessing steps are included, then match the preprocessing step with an input using input_name
     int? _inputIndex;
     int? _preprocessBlockIndex;
 
+    debugPrint("Matching given input name to input name in pipeline file.");
     // match _inputName to an input block
-      for (var i; i < modelPipeline!.inputs.length; i++) {
+      for (var i = 0; i < modelPipeline!.inputs.length; i++) {
         if (modelPipeline!.inputs[i].name == _inputName) {
           _inputIndex = i;
           break;
       }
     }
 
+    debugPrint("Matching input name to a preprocessing block in pipeline file.");
     // match _inputName to a preprocessing block
-    for (var i; i < modelPipeline!.preprocessing.length; i++) {
+    for (var i = 0; i < modelPipeline!.preprocessing.length; i++) {
       if (modelPipeline!.preprocessing[i].input_name == _inputName) {
         _preprocessBlockIndex = i;
         break;
@@ -129,23 +148,24 @@ class InferenceObject {
     // once the preprocessing step and input are matched, use the expects_type to validate the rawInput
     final String _expectedType = modelPipeline!.preprocessing[_preprocessBlockIndex].expects_type;
 
+    debugPrint("Validating that the raw input matches the 'expects_type' parameter in the pipeline file...");
     switch (_expectedType) {
       case 'image':
         if (rawInput is! img.Image) {
           if (kDebugMode) {
-            debugPrint("Raw input type: $rawInput.rawInput.runtimeType.toString()");
+            debugPrint("Raw input type: ${rawInput.runtimeType.toString()}");
             throw ArgumentError("This preprocessing block expects an image, but raw input is not an img.Image type. Aborting preprocessing.");
           }
           return rawInput;
         }
         if (kDebugMode) {
-            debugPrint("Raw input type match expected type. Proceeding with preprocessing.");
+            debugPrint("Raw input type matches expected type. Proceeding with preprocessing.");
             }
         break;
       case 'text':
         if (rawInput is! String) {
           if (kDebugMode) {
-            debugPrint("Raw input type: $rawInput.rawInput.runtimeType.toString()");
+            debugPrint("Raw input type: ${rawInput.runtimeType.toString()}");
             throw ArgumentError("This preprocessing block expects text, but raw input is not a String. Aborting preprocessing.");
           }
           return rawInput;
@@ -157,7 +177,7 @@ class InferenceObject {
       case 'audio':
         if (rawInput is! Uint8List) {
           if (kDebugMode) {
-            debugPrint("Raw input type: $rawInput.rawInput.runtimeType.toString()");
+            debugPrint("Raw input type: ${rawInput.runtimeType.toString()}");
             throw ArgumentError("This preprocessing block expects a audio, but raw input is not a Uint8List type. Aborting preprocessing.");
           }
           return rawInput;
@@ -170,14 +190,20 @@ class InferenceObject {
       default:
         throw UnimplementedError("Unsupported 'expects_type' in pipeline: $_expectedType");
       }
+      debugPrint("Raw input type validated.");
 
       // now that input is validated, start tracking the input with a variable
-      dynamic currentInput;
+      // initialize it with the rawInput
+      dynamic currentInput = rawInput;
 
+      debugPrint("Executing steps for preprocessing block ${modelPipeline!.preprocessing[_preprocessBlockIndex].input_name}...");
       // start looping through the preprocessing steps
       for (var preStep in modelPipeline!.preprocessing[_preprocessBlockIndex].steps) {
         currentInput = await _performPreprocessingStep(currentInput, preStep, _preprocessBlockIndex);
+        debugPrint("Preprocessing step ${preStep.step} completed successfully...");
       }
+
+      debugPrint("Preprocessing complete.");
 
       // return final input tensor
       return currentInput;
@@ -186,10 +212,12 @@ class InferenceObject {
   // postprocess complete a postprocessing block and return a Map which will be the final inference result
   // the input to postprocess is the postprocessing block, the raw outputs map (source tensors), and the final result map
   Future<dynamic> postprocess(Map<String, dynamic> rawOutputs, int postprocessBlockIndex, Map<String, dynamic> finalResults) async {
+    debugPrint("Starting postprocessing...");
     // declare some variables to make things easier
     ProcessingBlock block = modelPipeline!.postprocessing[postprocessBlockIndex];
     String outputName = block.output_name;
     
+    debugPrint("Checking if the postprocessing block contains steps...");
     // make sure pipeline includes postprocessing steps? if it doesn't, skip all of this and return rawInput
     if (modelPipeline!.postprocessing.isEmpty) {
       if (kDebugMode) {
@@ -198,10 +226,13 @@ class InferenceObject {
       return finalResults;
     }
 
+    debugPrint("Postprocessing block contained steps.");
+
+    debugPrint("Checking if source tensors are present in all postprocessing blocks...");
     // check that all source tensors in the postprocessing block are present in the output map
     List<String> sourceTensors = block.source_tensors;
     for (var tensor in sourceTensors) {
-      if (!outputs.containsKey(tensor)) {
+      if (!rawOutputs.containsKey(tensor)) {
         if (kDebugMode) {
             debugPrint("Output map does not contain source tensor: $tensor. Aborting postprocessing and returning final results map.");
           }
@@ -209,17 +240,24 @@ class InferenceObject {
       }
     }
 
-    // declare a variable to track the current output
-    dynamic currentResult;
+    debugPrint("Source tensors present in all postprocessing blocks.");
 
+    // declare a variable to track the current output
+    dynamic currentResult = rawOutputs[block.source_tensors[0]];
+
+    debugPrint("Executing steps for ${block.output_name}...");
     // start looping through the postprocessing steps
     for (var postStep in block.steps) {
       currentResult = await _performPostprocessingStep(currentResult, rawOutputs, postStep);
       if (currentResult == null && postStep != block.steps.last) {
         throw Exception("Postprocessing block '$outputName', step '${postStep.step}' failed or returned null unexpectedly.");
       }
+      debugPrint("Postprocessing step ${postStep.step} completed successfully...");
     }
+    
+    debugPrint("Postprocessing complete.");
 
+    debugPrint("Adding postprocessed result to the final results map.");
     // add postprocessed result to the final results map
     finalResults[modelPipeline!.postprocessing[postprocessBlockIndex].output_name] = (currentResult);
 
@@ -252,20 +290,21 @@ class InferenceObject {
 
       // normalize image, input is either img.Image or U8intList
       case 'normalize':
+        debugPrint("Normalizing image...");
         String? method = step.params['method'];
-        dynamic mean;
-        dynamic stddev;
-        dynamic value;
         String normalizeColorSpace = step.params['color_space'] ?? "RGB";
 
         try {
+          debugPrint("Checking input type. Normalization requires U8intList.");
           // check the input type. if it's img.Image, convert to U8intList
-          if (inputData == img.Image) {
+          if (inputData.runtimeType == img.Image) {
             try {
-                // Convert to RGB bytes
-                inputData = imgToBytes(inputData, normalizeColorSpace);
-                inputData = Uint8List.fromList(inputData);
-              } 
+              debugPrint("Input data is img.Image, converting to Uint8List...");
+              // Convert to RGB bytes
+              inputData = imgToBytes(inputData, normalizeColorSpace);
+              inputData = Uint8List.fromList(inputData);
+              debugPrint("Converted image to Uint8List.");
+            } 
             catch (e) {
                 if (kDebugMode) {
                   debugPrint('Error converting image to bytes: $e');
@@ -273,15 +312,21 @@ class InferenceObject {
                 throw Exception('Normalization error: Failed to convert image to bytes');
             }
           }
+          else {
+            debugPrint("Input data type is ${inputData.runtimeType}");
+          }
           var normBytes = Float32List(inputData.length);
           // first try the 'mean_stddev' method, which first normalizes the image pixel between 0 and 1 by dividing by 255,
           // then applies the mean and stddev normalization for each channel. This method requires the mean and stddev parameters 
           // to be lists with a length equal to the number of channels in the inputImage
+          debugPrint("Executing normalization using the $method method...");
           if (method == "mean_stddev") {
+            List mean = step.params['mean'] ?? List.filled(normalizeColorSpace.length, 0.456);
+            List stddev = step.params['stddev'] ?? List.filled(normalizeColorSpace.length, 0.224);
             for (var i = 0; i < inputData.length; i += 3) {
-              normBytes[i] = ((inputData[i] / 255) - mean?[0]) / stddev?[0];
-              normBytes[i++] = ((inputData[i++] / 255) - mean?[1]) / stddev?[1];
-              normBytes[i++] = ((inputData[i++] / 255) - mean?[2]) / stddev?[2];
+              normBytes[i] = ((inputData[i] / 255) - mean[0]) / stddev[0];
+              normBytes[i++] = ((inputData[i++] / 255) - mean[1]) / stddev[1];
+              normBytes[i++] = ((inputData[i++] / 255) - mean[2]) / stddev[2];
             }
             // final normImage = normBytes.reshape([1, inputImage.width, inputImage.height, inputImage.numChannels]);
             return normBytes;
@@ -289,16 +334,19 @@ class InferenceObject {
           // uniform normalization, instead of applying a per-channel norm, apply a singular mean and stddev value to all
           // pixel normalizations
           else if (method == "normalize_uniform") {
+            var mean = step.params['mean'] ?? 127.5;
+            var stddev = step.params['stddev'] ?? 127.5;
             for (var i = 0; i < inputData.length; i += 3) {
-              normBytes[i] = (inputData[i] - mean?[0]) / stddev?[0];
-              normBytes[i++] = (inputData[i++] - mean?[0]) / stddev?[0];
-              normBytes[i++] = (inputData[i++] - mean?[0]) / stddev?[0];
+              normBytes[i] = (inputData[i] - mean) / stddev;
+              normBytes[i++] = (inputData[i++] - mean) / stddev;
+              normBytes[i++] = (inputData[i++] - mean) / stddev;
             }
             // final normImage = normBytes.reshape([1, inputImage.width, inputImage.height, inputImage.numChannels]);
             return normBytes;
           }
           // uniform scaling - simply normalize all pixels to be between 0 and 1, based on a given scale_param (usually 255)
-          else if (method == "normalize_uniform") {
+          else if (method == "scale_div") {
+            var value = step.params['value'] ?? 255.0;
             for (var i = 0; i < inputData.length; i += 3) {
               normBytes[i] = inputData[i] / value;
               normBytes[i++] = inputData[i++] / value;
@@ -312,6 +360,7 @@ class InferenceObject {
               debugPrint("Error normalizing image: Invalid 'method' parameter");
             }
           }
+          debugPrint("Normalized image successfully.");
           return inputData; // return input image bytes if normalization didn't take place
         }
         catch (e) {
@@ -321,13 +370,15 @@ class InferenceObject {
           }
           return inputData;
         }
+
       
       // reformat preprocessed data to match input requirements
       case 'format':
-        dynamic finalData;
+        dynamic finalData = inputData;
         String targetDtype = step.params['target_dtype'];
         String inputColorSpace = step.params['color_space'];
         String dataLayout = step.params['data_layout'].toLowerCase();
+
         // first format data type and color space. supports 2 types of conversions: float32 and uint8
         // color space formatting is done with the imgToBytes helper method
         if (targetDtype == 'float32' && inputData is! Float32List) { 
@@ -347,6 +398,18 @@ class InferenceObject {
             throw Exception("Cannot format unsupported type to uint8"); 
           } 
         }
+
+        // get finalData shape for further processing
+        List<int> finalData_shape;
+        debugPrint("finalData runtime type = ${finalData.runtimeType}");
+        if (finalData is Float32List || finalData is Uint8List) {
+          finalData_shape = [1, finalData.length];
+        }
+        else {
+          finalData_shape = finalData.shape;
+        }
+
+        /*
         // then check data layout (ex: NHWC)
         // if target layout is NHWC, convert to NHWC if not already there, can only take NCHW as input
         if (dataLayout == 'nhwc' && !isNHWC(inputData.shape)) {
@@ -366,9 +429,10 @@ class InferenceObject {
             throw Exception("Only NHWC layouts can be converted to NCHW.");
           }
         }
+        */
 
         // lastly, check that the shape is identical to the shape parameter of the input object
-        List<int>? targetInputShape;
+        List<int> targetInputShape = [];
         String preprocessingBlockInputName = modelPipeline!.preprocessing[preprocessingBlockIndex].input_name;
         for (var inputs in modelPipeline!.inputs) {
           if (inputs.name == preprocessingBlockInputName) {
@@ -377,18 +441,23 @@ class InferenceObject {
           }
         }
 
-        if (finalData.shape != targetInputShape) {
+        if (finalData_shape != targetInputShape) {
           if (kDebugMode) {
-            debugPrint("Final formatted data shape $finalData.shape does not match target input shape $targetInputShape");
+            debugPrint("Final formatted data shape $finalData_shape does not match target input shape $targetInputShape");
             debugPrint("Attempting to convert final data to target input shape");
           }
 
           try { 
-            return finalData.reshape(targetInputShape!); 
-          } 
+            switch (targetDtype.toLowerCase()) {
+              case 'float32':
+                return (finalData as Float32List).reshape(targetInputShape);
+              //case 'uint8':
+              //  return (finalData as Uint8List).reshape(targetInputShape);
+            }
+          }
           catch (e) { 
             if (kDebugMode) {
-              debugPrint("Reshape error: $e. Input shape: ${finalData.shape}, Target shape: $targetInputShape");
+              debugPrint("Reshape error: $e. Input shape: $finalData_shape, Target shape: $targetInputShape");
             }
             return finalData;
           }
@@ -490,9 +559,9 @@ class InferenceObject {
     int totalElements = shape.reduce((a, b) => a* b);
     switch (dtype.toLowerCase()) {
       case 'float32':
-        return List.filled(totalElements, 0.0).reshape(shape);
+        return ListShape(List.filled(totalElements, 0.0)).reshape(shape);
       case 'uint8':
-        return List.filled(totalElements, 0).reshape(shape);
+        return ListShape(List.filled(totalElements, 0)).reshape(shape);
       default:
         throw Exception("Unsupported output dtype: $dtype");
     }
@@ -530,7 +599,13 @@ class InferenceObject {
       case 'map_labels':
         // check that the processed output is a list of floats
         if (processedOutput is! List) {
-          throw FormatException("Processed output is not a List, cannot map to classification labels.");
+          try {
+            debugPrint("Input to 'map_label' step isn't a List, trying to convert to List");
+            processedOutput = processedOutput.toList();
+          }
+          catch (e) {
+            throw FormatException("Processed output is not a List and cannot be converted to a List. Cannot map to classification labels.");
+          }
         }
         // load labels into memory
         try {
@@ -545,11 +620,15 @@ class InferenceObject {
         }
         // create recognitions, which is a list of labels mapped to a value in the raw output tensor
         List<Map<String, dynamic>> recognitions = [];
-        for (int i=0; i<processedOutput.length; i++) {
+        debugPrint("processedOutput type = ${processedOutput.runtimeType}");
+        debugPrint("Flattening processedOutput nested List.");
+        List<List<dynamic>> nestedProcessedOutput = processedOutput;
+        List<dynamic> flattenedProcessedOutput = nestedProcessedOutput.expand((x) => x).toList();
+        for (int i=0; i<flattenedProcessedOutput.length; i++) {
           recognitions.add({
             "index": i,
             "label": _labels![i],
-            "confidence": processedOutput[i],
+            "confidence": flattenedProcessedOutput[i],
           });
         }
         // set the processed output to the recognition list
@@ -567,6 +646,9 @@ class InferenceObject {
 
   // apply the softmax function on a given list of floats
   List<dynamic> applySoftmax(List<dynamic> raw_inputs) {
+    if (raw_inputs.any((x) => x == null)) {
+      throw Exception("Null value found in inputs to softmax.");
+    }
     double max_input = raw_inputs.reduce((a,b) => a > b ? a : b);
     List<double> exps = raw_inputs.map((input) => Math.exp(input - max_input)).toList();
     double sumExps = exps.reduce((a, b) => a + b);

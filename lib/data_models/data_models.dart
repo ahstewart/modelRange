@@ -100,8 +100,9 @@ class ProcessingBlock {
   final String expects_type;
   @JsonKey(defaultValue: '')
   final String interpretation;
-  @JsonKey(required: true)
+  @JsonKey(defaultValue: [])
   final List<String> source_tensors;
+  @JsonKey(defaultValue: [])
   final List<ProcessingStep> steps;
 
   ProcessingBlock({
