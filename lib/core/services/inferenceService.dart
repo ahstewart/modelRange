@@ -113,14 +113,14 @@ class InferenceObject {
 
     debugPrint("Starting preprocessing...");
     // if preprocessing steps are included, then match the preprocessing step with an input using input_name
-    int? _inputIndex;
-    int? _preprocessBlockIndex;
+    int? inputIndex;
+    int? preprocessBlockIndex;
 
     debugPrint("Matching given input name to input name in pipeline file.");
     // match _inputName to an input block
       for (var i = 0; i < modelPipeline!.inputs.length; i++) {
         if (modelPipeline!.inputs[i].name == _inputName) {
-          _inputIndex = i;
+          inputIndex = i;
           break;
       }
     }
@@ -129,13 +129,13 @@ class InferenceObject {
     // match _inputName to a preprocessing block
     for (var i = 0; i < modelPipeline!.preprocessing.length; i++) {
       if (modelPipeline!.preprocessing[i].input_name == _inputName) {
-        _preprocessBlockIndex = i;
+        preprocessBlockIndex = i;
         break;
       }
     }
 
     // check if the input could not be matched to an input block or preprocessing block
-    if (_inputIndex == null || _preprocessBlockIndex == null) {
+    if (inputIndex == null || preprocessBlockIndex == null) {
       if (kDebugMode) {
             debugPrint("Provided input name does not match input or preprocessing block in pipeline. Aborting preprocessing.");
           }
@@ -143,10 +143,10 @@ class InferenceObject {
     }
 
     // once the preprocessing step and input are matched, use the expects_type to validate the rawInput
-    final String _expectedType = modelPipeline!.preprocessing[_preprocessBlockIndex].expects_type;
+    final String expectedType = modelPipeline!.preprocessing[preprocessBlockIndex].expects_type;
 
     debugPrint("Validating that the raw input matches the 'expects_type' parameter in the pipeline file...");
-    switch (_expectedType) {
+    switch (expectedType) {
       case 'image':
         if (rawInput is! img.Image) {
           if (kDebugMode) {
@@ -185,7 +185,7 @@ class InferenceObject {
         break;
       // Add cases for other expected raw input types ('tensor', 'generic_list', etc.)
       default:
-        throw UnimplementedError("Unsupported 'expects_type' in pipeline: $_expectedType");
+        throw UnimplementedError("Unsupported 'expects_type' in pipeline: $expectedType");
       }
       debugPrint("Raw input type validated.");
 
@@ -193,10 +193,10 @@ class InferenceObject {
       // initialize it with the rawInput
       dynamic currentInput = rawInput;
 
-      debugPrint("Executing steps for preprocessing block ${modelPipeline!.preprocessing[_preprocessBlockIndex].input_name}...");
+      debugPrint("Executing steps for preprocessing block ${modelPipeline!.preprocessing[preprocessBlockIndex].input_name}...");
       // start looping through the preprocessing steps
-      for (var preStep in modelPipeline!.preprocessing[_preprocessBlockIndex].steps) {
-        currentInput = await _performPreprocessingStep(currentInput, preStep, _preprocessBlockIndex);
+      for (var preStep in modelPipeline!.preprocessing[preprocessBlockIndex].steps) {
+        currentInput = await _performPreprocessingStep(currentInput, preStep, preprocessBlockIndex);
         debugPrint("Preprocessing step ${preStep.step} completed successfully...");
       }
 
@@ -640,8 +640,58 @@ class InferenceObject {
         // set the processed output to the recognition list
         processedOutput = recognitions;
         debugPrint("Map label debug message: processedOutput[0] = ${processedOutput[0]}");
+      // filters object detections by some threshold
+      // expects a tensor, or a List<dynamic> in Dart
       case 'filter_by_score':
+/*         // check that the processed output is a list of floats
+        debugPrint("Validating that 'filter_by_score' input is a List");
+        if (processedOutput is! List) {
+          try {
+            debugPrint("Input to 'map_label' step isn't a List, trying to convert to List");
+            processedOutput = processedOutput.toList();
+          }
+          catch (e) {
+            throw FormatException("Processed output is not a List and cannot be converted to a List. Cannot map to classification labels.");
+          }
+        }
+        // declare tempOutput
+        List<dynamic> tempOutput = [];
+        // check if processedOutput is a nested list
+        debugPrint("Checking if processedOutput type = ${processedOutput.runtimeType} is a nested list.");
+        if (isNestedList(processedOutput)) {
+          debugPrint("Flattening processedOutput nested List.");
+          List<dynamic> flattenedProcessedOutput = processedOutput.expand((x) => x).toList();
+          tempOutput = flattenedProcessedOutput;
+        }
+        else {
+          tempOutput = processedOutput;
+        } */
+        // find raw output using score_tensor param
+        String scoreTensorName = step.params['score_tensor'];
+        dynamic scoreTensor = outputTensors[scoreTensorName];
+        String numDetectionsTensorName = step.params['num_detections_tensor'];
+        dynamic numDetectionsTensor = outputTensors[numDetectionsTensorName];
+        final int numDetections = (numDetectionsTensor is List ? numDetectionsTensor[0] as num : numDetectionsTensor as num).toInt();
+        
+        // set threshold according to YAML file, default to 0.5 if none found
+        double threshold = (step.params['threshold'] as num?)?.toDouble() ?? 0.5;
+        Map<int, List<int>> filteredDetectionIndices = {};
 
+        for (int i = 0; i < scoreTensor.shape[0]; i++) {
+          for (int j = 0; j < numDetections; j++) {
+            if (scoreTensor[i][j] > threshold) {
+              filteredDetectionIndices[i] = scoreTensor[i][j];
+            }
+          }
+        }
+        
+        debugPrint("InferenceService: Filtered ${filteredDetectionIndices.length} detections above threshold $threshold");
+        // This step's output (filteredIndices) becomes processedData for the next step.
+        return filteredDetectionIndices;
+
+      // WORKING ON DECODING BOXES
+      case 'decode_boxes':
+        
 
       default:
         if (kDebugMode) {
