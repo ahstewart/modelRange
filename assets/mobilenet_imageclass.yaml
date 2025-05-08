@@ -61,6 +61,9 @@ postprocessing:
       # Note: An "apply_activation" step with "function": "softmax" could be added here
       # if the model outputs logits and normalized probabilities are desired.
       # The current Flutter example code works directly with the scores for sorting.
+      - step: apply_activation
+        params:
+          function: softmax
       - step: map_labels
         params:
           # URL/Path to the label file (matches the one in the Flutter code)

@@ -620,19 +620,29 @@ class InferenceObject {
         }
         // create recognitions, which is a list of labels mapped to a value in the raw output tensor
         List<Map<String, dynamic>> recognitions = [];
-        debugPrint("processedOutput type = ${processedOutput.runtimeType}");
-        debugPrint("Flattening processedOutput nested List.");
-        List<List<dynamic>> nestedProcessedOutput = processedOutput;
-        List<dynamic> flattenedProcessedOutput = nestedProcessedOutput.expand((x) => x).toList();
-        for (int i=0; i<flattenedProcessedOutput.length; i++) {
+        // declare tempOutput
+        List<dynamic> tempOutput = [];
+        // check if processedOutput is a nested list
+        debugPrint("Checking if processedOutput type = ${processedOutput.runtimeType} is a nested list.");
+        if (isNestedList(processedOutput)) {
+          debugPrint("Flattening processedOutput nested List.");
+          List<dynamic> flattenedProcessedOutput = processedOutput.expand((x) => x).toList();
+          tempOutput = flattenedProcessedOutput;
+        }
+        else {
+          tempOutput = processedOutput;
+        }
+        debugPrint("Map label debug message: tempOutput type = ${tempOutput.runtimeType}");
+        for (int i=0; i<tempOutput.length; i++) {
           recognitions.add({
             "index": i,
             "label": _labels![i],
-            "confidence": flattenedProcessedOutput[i],
+            "confidence": tempOutput[i],
           });
         }
         // set the processed output to the recognition list
         processedOutput = recognitions;
+        debugPrint("Map label debug message: processedOutput[0] = ${processedOutput[0]}");
 
       default:
         if (kDebugMode) {
@@ -644,13 +654,30 @@ class InferenceObject {
   }
 
 
+  // helper function to check if list is flattened
+  bool isNestedList(List list) {
+    return (list.isNotEmpty && list.first is List);
+  }
+
+
   // apply the softmax function on a given list of floats
   List<dynamic> applySoftmax(List<dynamic> raw_inputs) {
     if (raw_inputs.any((x) => x == null)) {
       throw Exception("Null value found in inputs to softmax.");
     }
-    double max_input = raw_inputs.reduce((a,b) => a > b ? a : b);
-    List<double> exps = raw_inputs.map((input) => Math.exp(input - max_input)).toList();
+    debugPrint("Applying softmax activation");
+    debugPrint("Checking if input is a nested list");
+    List<dynamic> softmaxInput = [];
+    if (isNestedList(raw_inputs)) {
+      debugPrint("Input is nested list, flattening list.");
+      debugPrint("Input type = ${raw_inputs.runtimeType}");
+      softmaxInput = raw_inputs.expand((x) => x).cast<dynamic>().toList();
+    }
+    else {
+      softmaxInput = raw_inputs;
+    }
+    double max_input = softmaxInput.reduce((a,b) => a > b ? a : b);
+    List<double> exps = softmaxInput.map((input) => Math.exp(input - max_input)).toList();
     double sumExps = exps.reduce((a, b) => a + b);
     return exps.map((exp) => exp / sumExps).toList();
   }
