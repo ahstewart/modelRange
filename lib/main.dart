@@ -8,6 +8,7 @@ import 'core/services/inferenceService.dart';
 import 'core/data_models/pipeline.dart';
 import 'package:yaml/yaml.dart';
 import 'dart:convert';
+import 'features/object_detection/object_detection.dart';
 
 
 // optional: Since our Person class is serializable, we must add this line.
@@ -193,6 +194,18 @@ class ModelRange extends ConsumerWidget {
       //final yamlMap = loadYaml(metadataPath);
       //final jsonMap = _convertYamlToJson(yamlMap);
       return ImageClassificationWidget(
+        modelName: modelPath,
+        pipelinePath: metadataPath,
+      );
+    }
+
+      // check if the selected model is the one we've built inference for
+    else if (selectedModel.name == "someone/lamemodel") {
+      String metadataPath = 'assets/mobilenet_objectdetect.yaml';
+      String modelPath = 'assets/ssd_mobilenet_v1_objectdetection.tflite';
+      //final yamlMap = loadYaml(metadataPath);
+      //final jsonMap = _convertYamlToJson(yamlMap);
+      return ObjectDetectionWidget(
         modelName: modelPath,
         pipelinePath: metadataPath,
       );

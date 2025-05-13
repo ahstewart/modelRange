@@ -592,18 +592,9 @@ class InferenceObject {
               debugPrint("Warning: Unsupported activation function: $function, returning input data unchanged."); 
             }
         }
+      // WORKING ON REFACTORING TO SUPPORT DETECTION
       // map raw or activated outputs to a set of labels for classification
       case 'map_labels':
-        // check that the processed output is a list of floats
-        if (processedOutput is! List) {
-          try {
-            debugPrint("Input to 'map_label' step isn't a List, trying to convert to List");
-            processedOutput = processedOutput.toList();
-          }
-          catch (e) {
-            throw FormatException("Processed output is not a List and cannot be converted to a List. Cannot map to classification labels.");
-          }
-        }
         // load labels into memory
         try {
           final classificationLabels = await rootBundle.loadString(step.params['labels_url']);
@@ -615,31 +606,50 @@ class InferenceObject {
         catch (e) {
           throw Exception("Failed fetching classification labels from $step.params['labels_url']: $e");
         }
-        // create recognitions, which is a list of labels mapped to a value in the raw output tensor
-        List<Map<String, dynamic>> recognitions = [];
-        // declare tempOutput
-        List<dynamic> tempOutput = [];
-        // check if processedOutput is a nested list
-        debugPrint("Checking if processedOutput type = ${processedOutput.runtimeType} is a nested list.");
-        if (isNestedList(processedOutput)) {
-          debugPrint("Flattening processedOutput nested List.");
-          List<dynamic> flattenedProcessedOutput = processedOutput.expand((x) => x).toList();
-          tempOutput = flattenedProcessedOutput;
+        // check whether task is classification or object detection
+        // image classification map_labels takes a List of floats as input
+        // object detection map_labels takes a Map<int, List<Map<String, dynamic>>>
+        if (processedOutput is Map) {
+          debugPrint("Mapping labels assuming object detection task");
+          // loop through detection batches
+          for (int i = 0; i < processedOutput.length; i++) {
+            // loop through detections
+            for (var detectionMap in processedOutput[i]!) {
+              detectionMap['label'] = _labels?[detectionMap['original_index']];
+            }
+          }
         }
-        else {
-          tempOutput = processedOutput;
+        else if (processedOutput is List) {
+          debugPrint("Mapping labels assuming image classification task");
+          // create recognitions, which is a list of labels mapped to a value in the raw output tensor
+          List<Map<String, dynamic>> recognitions = [];
+          // declare tempOutput
+          List<dynamic> tempOutput = [];
+          // check if processedOutput is a nested list
+          debugPrint("Checking if processedOutput type = ${processedOutput.runtimeType} is a nested list.");
+          if (isNestedList(processedOutput)) {
+            debugPrint("Flattening processedOutput nested List.");
+            List<dynamic> flattenedProcessedOutput = processedOutput.expand((x) => x).toList();
+            tempOutput = flattenedProcessedOutput;
+          }
+          else {
+            tempOutput = processedOutput;
+          }
+          debugPrint("Map label debug message: tempOutput type = ${tempOutput.runtimeType}");
+          for (int i=0; i<tempOutput.length; i++) {
+            recognitions.add({
+              "index": i,
+              "label": _labels![i],
+              "confidence": tempOutput[i],
+            });
+          }
+          // set the processed output to the recognition list
+          processedOutput = recognitions;
+          debugPrint("Map label debug message: processedOutput[0] = ${processedOutput[0]}");
+        // filters object detections by some threshold
+        // expects a tensor, or a List<dynamic> in Dart
         }
-        debugPrint("Map label debug message: tempOutput type = ${tempOutput.runtimeType}");
-        for (int i=0; i<tempOutput.length; i++) {
-          recognitions.add({
-            "index": i,
-            "label": _labels![i],
-            "confidence": tempOutput[i],
-          });
-        }
-        // set the processed output to the recognition list
-        processedOutput = recognitions;
-        debugPrint("Map label debug message: processedOutput[0] = ${processedOutput[0]}");
+       
       // filters object detections by some threshold
       // expects a tensor, or a List<dynamic> in Dart
       case 'filter_by_score':
@@ -687,11 +697,53 @@ class InferenceObject {
         
         debugPrint("InferenceService: Filtered ${filteredDetectionIndices.length} detections above threshold $threshold");
         // This step's output (filteredIndices) becomes processedData for the next step.
-        return filteredDetectionIndices;
+        processedOutput = filteredDetectionIndices;
 
-      // WORKING ON DECODING BOXES
+      // uses filtered indices and later on the coordinate format config to construct the final detection tensors
+      // expected a Map of filtered indices as input, from 'filter_by_score'
       case 'decode_boxes':
+        // Expects processedOutput (from previous step) to be the list of filtered indices
+        if (processedOutput is! Map<int, List<int>>) {
+          throw FormatException(
+              "Step 'decode_boxes' expects Map<int, List<int>> (filtered indices) input. Got ${processedOutput.runtimeType}");
+        }
+        final params = step.params;
+        final boxTensorName = params['box_tensor'] as String?;
+        if (boxTensorName == null || !outputTensors.containsKey(boxTensorName)) {
+          throw Exception("decode_boxes requires a valid 'box_tensor' param pointing to a raw output.");
+        }
+        // define raw box Map, generalizing for multiple batch detection box tensors
+        final Map<int, List<List<dynamic>>> boxesRaw = {};
+        for (int i = 0; i < outputTensors[boxTensorName].length; i++) {
+          boxesRaw[i] = outputTensors[boxTensorName][i];
+        }
+        debugPrint("Starting box decoding...");
+        Map<int, List<Map<String, dynamic>>> decodedData = {};
+        String scoreTensorName = step.params['score_tensor'];
+        dynamic scoreTensor = outputTensors[scoreTensorName];
+        for (int i = 0; i < processedOutput.length; i++) {
+          for (int index in processedOutput[i]!) {
+            if (index < boxesRaw[i]!.length) {
+              // Convert box coordinates to double
+              final box = boxesRaw[i]?[index].map((val) => (val as num).toDouble()).toList();
+              if (box?.length == 4) { // Basic validation
+                decodedData[i]?.add({
+                  "original_index": index, // Preserve original index for later mapping
+                  "score": scoreTensor[i]?[index],
+                  "raw_box": box, // Pass raw normalized box [ymin, xmin, ymax, xmax] or other format
+                });
+              } else {
+                debugPrint("InferenceService: Warning: Box at index $index does not have 4 coordinates in decode_boxes.");
+              }
+            } else {
+              debugPrint("InferenceService: Warning: Index $index out of bounds for boxesRaw (length ${boxesRaw.length}) in decode_boxes.");
+            }
+          }
+        }
         
+        // This map of a list of maps becomes processedData for the next step
+        processedOutput = decodedData;
+
 
       default:
         if (kDebugMode) {

@@ -1,0 +1,5 @@
+- sealed inference result classes 
+- separation of common widgets like image picker
+- keep track of inference data objects throughout the inference pipeline
+- add support for batch image classification
+- add UI support for batched object detection

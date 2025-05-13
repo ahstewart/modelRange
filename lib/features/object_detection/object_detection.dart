@@ -1,7 +1,7 @@
 // this file will house the various functions and classes that will enable model inference
 // primary tasks handled will be model pre-processing, inference, and post-processing
 
-import 'dart:ffi';
+//import 'dart:ffi';
 import 'dart:io';
 import 'dart:math' as Math;
 import 'dart:typed_data';
@@ -15,16 +15,17 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 import '../../core/services/inferenceService.dart';
 import '../../core/data_models/pipeline.dart';
+import '../../core/utils/painters.dart';
  
 
-// file purpose: this is the main widget for image classification, it will facilitate the capturing of images and running the inference of a model
+// file purpose: this is the main widget for object detection, it will facilitate the capturing of images and running the inference of a model
 // on the captured image. The widget will also display the results of the inference.
-var modelNameReal = 'assets/mobilenetv4_conv_small.e2400_r224_in1k_float32.tflite';
-var pipelinePathReal = 'assets/metadata/mobilenet_imageclass.yaml';
-var labelName = 'assets/imagenet_classes.txt';
+var modelNameReal = 'assets/ssd_mobilenet_v1_objectdetection.tflite';
+var pipelinePathReal = 'assets/mobilenet_objectdetect.yaml';
+var labelName = 'assets/coco-labels-91.txt';
 
 
-// to generalize the image classification task, we need the image classification widget to accept the model metadata 
+// to generalize the object detection task, we need the object detection widget to accept the model metadata 
 
 class ObjectDetectionWidget extends ConsumerStatefulWidget {
   final String pipelinePath;
@@ -46,13 +47,19 @@ class _ObjectDetectionWidgetState extends ConsumerState<ObjectDetectionWidget> {
   bool _isLoading = false;
   File? _selectedImage;
   img.Image? _decodedImage;
-  List<dynamic>? _recognitions;
+  List<Map<String, dynamic>>? _recognitions;
   // define the input map
   Map<String, dynamic> inputMap = {};
   // define the final inference results map
-  Map<String, dynamic> inferenceResults = {};
+  Map<int, List<Map<String, dynamic>>> inferenceResults = {};
   // number of results displayed on the screen, default to 3
   int numResults = 3;
+  // Colors for bounding boxes - cycle through them
+  final List<Color> _boxColors = [
+    Colors.red, Colors.blue.shade600, Colors.green, Colors.amber,
+    Colors.purple, Colors.orange, Colors.teal, Colors.pink
+  ];
+  Size _imageSize = Size.zero; // Store original image size for scaling boxes
 
   @override
   void initState() {
@@ -62,7 +69,7 @@ class _ObjectDetectionWidgetState extends ConsumerState<ObjectDetectionWidget> {
       pipelinePath: widget.pipelinePath
     );
     if (kDebugMode) {
-      debugPrint("Initializing Image Classification Widget");
+      debugPrint("Initializing Object Detection Widget");
     }
   }
     
@@ -85,6 +92,7 @@ class _ObjectDetectionWidgetState extends ConsumerState<ObjectDetectionWidget> {
       debugPrint("Decoding image so it can fed into model...");
       File imageFile = File(image!.path);
       _decodedImage = img.decodeImage(await imageFile.readAsBytes());
+      _imageSize = Size(_decodedImage!.width.toDouble(), _decodedImage!.height.toDouble());
 
       setState(() {
         _selectedImage = imageFile;
@@ -127,7 +135,7 @@ class _ObjectDetectionWidgetState extends ConsumerState<ObjectDetectionWidget> {
       }
       setState(() {
         _recognitions = [{"label": "Error", "confidence": "Could not get confidence"}];
-      });
+      }); 
     }
 
     finally {
@@ -137,20 +145,23 @@ class _ObjectDetectionWidgetState extends ConsumerState<ObjectDetectionWidget> {
     }
 
     // check that the inference resulted in actual outputs
-    if (inferenceResults.isNotEmpty && inferenceResults.values.first != null) {
+    if (inferenceResults.isNotEmpty) {
       // use the inference results to update the UI
-      List<Map<String, dynamic>> recongnitions = inferenceResults.values.first;
+      List<Map<String, dynamic>> recognitions = inferenceResults.values.first;
       // reorder the final recognitions by highest probability first
-      recongnitions.removeWhere((r) => r['confidence'] == null);
-      recongnitions.sort((a,b) => (b['confidence'] as double).compareTo(a['confidence'] as double));
+      recognitions.removeWhere((r) => r['score'] == null);
+      recognitions.sort((a,b) => (b['score'] as double).compareTo(a['score'] as double));
 
       setState(() {
-        _recognitions = recongnitions;
+        _recognitions = recognitions;
       });
     }
     else {
       setState(() {
-        _recognitions = [{"label": "Error running model", "confidence": 0.0}];
+        _recognitions = [{"original_index": 0, 
+                          "score": 0.0,
+                          "raw_box": [0,0,0,0],
+                          "label": "Error running model",}];
       });
     }
 
@@ -169,98 +180,144 @@ class _ObjectDetectionWidgetState extends ConsumerState<ObjectDetectionWidget> {
     catch (e) {
       debugPrint("Error setting numResults, maybe it's not in the pipeline YAML. Using default value of 3.");
     }
+  }
 
+  // Helper Widget to Display Results Based on the Sealed Result Type
+  Widget _buildResultDisplay() {
+    final result = _recognitions;
+
+    if (_isLoading) {
+      return const Padding(
+        padding: EdgeInsets.all(16.0),
+        child: CircularProgressIndicator(),
+      );
+    }
+
+    if (result == null) {
+      if (!inferenceObject.isReady && !_isLoading) {
+        return const Padding(
+            padding: EdgeInsets.all(16.0),
+            child: Text("Model not loaded. Check logs.",
+                style: TextStyle(color: Colors.orange, fontSize: 16)));
+      }
+      return Container(height: 50); // Placeholder
+    }
+
+    return Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 15.0, vertical: 10.0),
+          child: Text(
+              'Detected ${_recognitions?.length} objects above threshold.',
+              style: Theme.of(context).textTheme.bodyLarge,
+            ),
+          // Note: The actual boxes are drawn by the CustomPainter in the Stack
+        );
   }
 
 
   @override
   Widget build(BuildContext context) {
+    // Get the size of the screen for calculating preview size
+    final screenSize = MediaQuery.of(context).size;
+    // Calculate a suitable size for the image preview, leaving padding
+    final previewWidth = screenSize.width - 32.0; // 16 padding on each side
+    // Maintain aspect ratio for height or set a max height
+    // Ensure _imageSize.width is not zero to prevent division by zero
+    final double aspectRatio = _imageSize.width > 0 ? _imageSize.height / _imageSize.width : 1.0;
+    final previewHeight = Math.min(previewWidth * aspectRatio, screenSize.height * 0.5); // Max 50% screen height
+
+
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Image Classification'),
+        title: Text(inferenceObject.modelPipeline?.metadata[0].model_name ?? 'Object Detection'),
       ),
-      body: SingleChildScrollView( // Allow scrolling if content overflows
-        child: Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: <Widget>[
-              const SizedBox(height: 20),
-              // Display selected image
-              _selectedImage == null
-                  ? Container(
-                      height: 250,
-                      width: 250,
-                      decoration: BoxDecoration(
-                        border: Border.all(color: Colors.grey),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: const Center(child: Text('No image selected.')),
-                    )
-                  : Container(
-                      margin: const EdgeInsets.all(10),
-                      decoration: BoxDecoration(
-                        border: Border.all(color: Colors.grey),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: ClipRRect( // Clip image to rounded corners
-                        borderRadius: BorderRadius.circular(11),
-                        child: Image.file(
-                          _selectedImage!,
-                          width: 300,
-                          height: 300,
-                          fit: BoxFit.cover,
-                        ),
-                      ),
+      body: SafeArea(
+        child: SingleChildScrollView(
+          child: Center(
+            child: Padding(
+              padding: const EdgeInsets.all(16.0),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: <Widget>[
+                  const SizedBox(height: 20),
+                  // --- Image Display Area with Stack for Overlays ---
+                  Container(
+                    constraints: BoxConstraints( // Constrain the preview size
+                      maxWidth: previewWidth,
+                      maxHeight: previewHeight,
                     ),
-              const SizedBox(height: 20),
-              // Buttons to pick image
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                children: [
-                  ElevatedButton.icon(
-                    icon: const Icon(Icons.image),
-                    label: const Text('Gallery'),
-                    onPressed: () => _pickImage(ImageSource.gallery),
+                    decoration: BoxDecoration(
+                      border: Border.all(color: Theme.of(context).colorScheme.outline),
+                      borderRadius: BorderRadius.circular(12),
+                      color: Colors.grey[200],
+                    ),
+                    child: _selectedImage == null
+                        ? const Center(child: Text('No image selected.'))
+                        : ClipRRect( // Clip contents to rounded border
+                            borderRadius: BorderRadius.circular(11.0),
+                            child: Stack(
+                              // Use a key to ensure the Stack rebuilds if image changes,
+                              // which can help ensure LayoutBuilder gets correct constraints.
+                              key: ValueKey(_selectedImage?.path),
+                              fit: StackFit.expand, // Make stack fill the container
+                              children: [
+                                // Base Image
+                                Image.file(
+                                  _selectedImage!,
+                                  fit: BoxFit.contain, // Use contain to see the whole image
+                                  errorBuilder: (context, error, stackTrace) =>
+                                      const Center(child: Text('Error loading image')),
+                                ),
+                                // Overlay Painter if results are available
+                                if (_recognitions!.isNotEmpty &&
+                                    _imageSize != Size.zero)
+                                  LayoutBuilder( // Use LayoutBuilder to get the exact size of the Stack area
+                                    builder: (context, constraints) {
+                                      // Ensure constraints are valid before painting
+                                      if (constraints.maxWidth.isFinite && constraints.maxHeight.isFinite) {
+                                        return CustomPaint(
+                                          painter: DetectionBoxPainter(
+                                            recognitions: _recognitions ?? [],
+                                            originalImageSize: _imageSize,
+                                            previewSize: constraints.biggest, // Use actual rendered size
+                                            boxColors: _boxColors,
+                                          ),
+                                        );
+                                      }
+                                      return const SizedBox.shrink(); // Don't paint if constraints are bad
+                                    }
+                                  ),
+                              ],
+                            ),
+                          ),
                   ),
-                  ElevatedButton.icon(
-                    icon: const Icon(Icons.camera_alt),
-                    label: const Text('Camera'),
-                    onPressed: () => _pickImage(ImageSource.camera),
+                  const SizedBox(height: 30),
+                  // Buttons
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                    children: [
+                      ElevatedButton.icon(
+                        icon: const Icon(Icons.image_outlined),
+                        label: const Text('Gallery'),
+                        onPressed: _isLoading ? null : () => _pickImage(ImageSource.gallery),
+                      ),
+                      ElevatedButton.icon(
+                        icon: const Icon(Icons.camera_alt_outlined),
+                        label: const Text('Camera'),
+                        onPressed: _isLoading ? null : () => _pickImage(ImageSource.camera),
+                      ),
+                    ],
                   ),
+                  const SizedBox(height: 30),
+                  // Display loading indicator or results summary/error
+                  _buildResultDisplay(),
+                  const SizedBox(height: 20),
                 ],
               ),
-              const SizedBox(height: 20),
-              // Display loading indicator or results
-              _isLoading
-                  ? const CircularProgressIndicator()
-                  : _recognitions != null
-                      ? Padding(
-                          padding: const EdgeInsets.all(15.0),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              const Text(
-                                'Results:',
-                                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                              ),
-                              const SizedBox(height: 10),
-                              // Display top 3 results (or fewer if less results)
-                              ..._recognitions!.take(numResults).map((rec) {
-                                return Text(
-                                  '${rec['label']} (${(rec['confidence'] * 100).toStringAsFixed(1)}%)',
-                                  style: const TextStyle(fontSize: 16),
-                                );
-                              }).toList(),
-                            ],
-                          ),
-                        )
-                      : Container(), // Show nothing if no results yet
-              const SizedBox(height: 20),
-            ],
+            ),
           ),
         ),
       ),
     );
   }
- }
-  
+}

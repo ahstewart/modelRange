@@ -76,11 +76,14 @@ flutter:
   assets:
     - assets/
     - assets/metadata/
-    - assets/images
+    - assets/images/
     - assets/images/michael-sum-LEpfefQf4rU-unsplash.jpg
     - assets/mobilenetv4_conv_small.e2400_r224_in1k_float32.tflite
     - assets/imagenet_classes.txt
     - assets/mobilenet_imageclass.yaml
+    - assets/ssd_mobilenet_v1_objectdetection.tflite
+    - assets/mobilenet_objectdetect.yaml
+    - assets/coco-labels-91.txt
   #   - images/a_dot_ham.jpeg
 
   # An image asset can refer to one or more resolution-specific "variants", see
