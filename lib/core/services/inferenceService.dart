@@ -22,6 +22,8 @@ class InferenceObject {
   List<String>? _labels;
   bool get isReady => _interpreter != null && modelPipeline != null;
 
+  dynamic scoreTensor;
+
   final String modelPath;
   final String pipelinePath;
 
@@ -266,7 +268,7 @@ class InferenceObject {
   // execute a preprocessing step, given the step and the input data
   Future<dynamic> _performPreprocessingStep(dynamic inputData, ProcessingStep step, int preprocessingBlockIndex) async {
     if (kDebugMode) {
-          debugPrint("Executing preprocessing step: $step.step");
+          debugPrint("Executing preprocessing step: ${step.step}");
     }
 
     switch (step.step) {
@@ -678,7 +680,7 @@ class InferenceObject {
         } */
         // find raw output using score_tensor param
         String scoreTensorName = step.params['score_tensor'];
-        dynamic scoreTensor = outputTensors[scoreTensorName];
+        scoreTensor = outputTensors[scoreTensorName];
         String numDetectionsTensorName = step.params['num_detections_tensor'];
         dynamic numDetectionsTensor = outputTensors[numDetectionsTensorName];
         final int numDetections = (numDetectionsTensor is List ? numDetectionsTensor[0] as num : numDetectionsTensor as num).toInt();
@@ -687,10 +689,18 @@ class InferenceObject {
         double threshold = (step.params['threshold'] as num?)?.toDouble() ?? 0.5;
         Map<int, List<int>> filteredDetectionIndices = {};
 
-        for (int i = 0; i < scoreTensor.shape[0]; i++) {
+        // check if scoreTensor is a nested list
+        /*debugPrint("Checking if scoreTensor type = ${scoreTensor.runtimeType} is a nested list.");
+        if (isNestedList(scoreTensor)) {
+          debugPrint("Flattening scoreTensor nested List.");
+          List<dynamic> tempTensor = scoreTensor.expand((x) => x as Iterable).toList();
+          scoreTensor = tempTensor;
+        }*/
+
+        for (int i = 0; i < scoreTensor.length; i++) {
           for (int j = 0; j < numDetections; j++) {
             if (scoreTensor[i][j] > threshold) {
-              filteredDetectionIndices[i] = scoreTensor[i][j];
+              filteredDetectionIndices[i]?[j] = scoreTensor[i][j];
             }
           }
         }
@@ -719,8 +729,6 @@ class InferenceObject {
         }
         debugPrint("Starting box decoding...");
         Map<int, List<Map<String, dynamic>>> decodedData = {};
-        String scoreTensorName = step.params['score_tensor'];
-        dynamic scoreTensor = outputTensors[scoreTensorName];
         for (int i = 0; i < processedOutput.length; i++) {
           for (int index in processedOutput[i]!) {
             if (index < boxesRaw[i]!.length) {

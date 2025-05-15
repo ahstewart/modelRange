@@ -51,7 +51,7 @@ class _ObjectDetectionWidgetState extends ConsumerState<ObjectDetectionWidget> {
   // define the input map
   Map<String, dynamic> inputMap = {};
   // define the final inference results map
-  Map<int, List<Map<String, dynamic>>> inferenceResults = {};
+  Map<String, dynamic> inferenceResults = {};
   // number of results displayed on the screen, default to 3
   int numResults = 3;
   // Colors for bounding boxes - cycle through them
@@ -127,6 +127,7 @@ class _ObjectDetectionWidgetState extends ConsumerState<ObjectDetectionWidget> {
 
       // run inference on selected image
       inferenceResults = await inferenceObject.performInference(inputMap);
+      debugPrint("Inference results = ${inferenceResults}");
     }
 
     catch (e) {
@@ -146,12 +147,17 @@ class _ObjectDetectionWidgetState extends ConsumerState<ObjectDetectionWidget> {
 
     // check that the inference resulted in actual outputs
     if (inferenceResults.isNotEmpty) {
-      // use the inference results to update the UI
+      /*// use the inference results to update the UI
       List<Map<String, dynamic>> recognitions = inferenceResults.values.first;
       // reorder the final recognitions by highest probability first
       recognitions.removeWhere((r) => r['score'] == null);
-      recognitions.sort((a,b) => (b['score'] as double).compareTo(a['score'] as double));
+      recognitions.sort((a,b) => (b['score'] as double).compareTo(a['score'] as double));*/
 
+      List<Map<String, dynamic>> recognitions = [];
+      var firstValue = inferenceResults.values.first;
+      if (firstValue is List<Map<String, dynamic>>) {
+        recognitions = firstValue;
+      }
       setState(() {
         _recognitions = recognitions;
       });
