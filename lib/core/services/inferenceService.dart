@@ -512,6 +512,7 @@ class InferenceObject {
     _interpreter?.runForMultipleInputs(processedInputs, outputBuffers);
     debugPrint("Inference completed.");
     if (kDebugMode) {
+      developer.log("Inspecting outputBuffers variable from the TFLite inference.");
       developer.inspect(outputBuffers);
     }
 
@@ -529,7 +530,8 @@ class InferenceObject {
     if (modelPipeline!.postprocessing.isNotEmpty) {
       // loop through the postprocessing blocks and run the postprocess method
       for (int i = 0; i < modelPipeline!.postprocessing.length; i++) {
-        finalResults = await postprocess(inferenceOutputs, i, finalResults);
+        String blockName = modelPipeline!.postprocessing[i].output_name;
+        finalResults[blockName] = await postprocess(inferenceOutputs, i, finalResults);
         if (kDebugMode) {
           debugPrint("Postprocessing block ${modelPipeline!.postprocessing[i].output_name} completed.");
         }
@@ -599,6 +601,13 @@ class InferenceObject {
               debugPrint("Warning: Unsupported activation function: $function, returning input data unchanged."); 
             }
         }
+
+        if (kDebugMode) {
+          debugPrint("Finished ${step.step} postprocessing step.");
+          developer.log("Inspecting ${step.step} postprocessing output:n processedOutput");
+          developer.inspect(processedOutput);
+        }
+
       // WORKING ON REFACTORING TO SUPPORT DETECTION
       // map raw or activated outputs to a set of labels for classification
       case 'map_labels':
@@ -617,7 +626,7 @@ class InferenceObject {
         // image classification map_labels takes a List of floats as input
         // object detection map_labels takes a Map<int, List<Map<String, dynamic>>>
         if (processedOutput is Map) {
-          debugPrint("Mapping labels assuming object detection task");
+          debugPrint("Mapping labels assuming object detection task.");
           // loop through detection batches
           for (int i = 0; i < processedOutput.length; i++) {
             // loop through detections
@@ -652,7 +661,11 @@ class InferenceObject {
           }
           // set the processed output to the recognition list
           processedOutput = recognitions;
-          debugPrint("Map label debug message: processedOutput[0] = ${processedOutput[0]}");
+          if (kDebugMode) {
+            debugPrint("Finished ${step.step} postprocessing step.");
+            developer.log("Inspecting ${step.step} postprocessing output:n processedOutput");
+            developer.inspect(processedOutput);
+          }
         // filters object detections by some threshold
         // expects a tensor, or a List<dynamic> in Dart
         }
@@ -717,10 +730,17 @@ class InferenceObject {
         
         debugPrint("InferenceService: Filtered ${filteredDetectionIndices[0]!.length} detections above threshold $threshold");
         if (kDebugMode) {
+          developer.log("Inspecting ${step.step} postprocessing variable: filteredDetectionIndices");
           developer.inspect(filteredDetectionIndices);
         }
         // This step's output (filteredIndices) becomes processedData for the next step.
         processedOutput = filteredDetectionIndices;
+
+        if (kDebugMode) {
+            debugPrint("Finished ${step.step} postprocessing step.");
+            developer.log("Inspecting ${step.step} postprocessing output: processedOutput");
+            developer.inspect(processedOutput);
+        }
 
       // uses filtered indices and later on the coordinate format config to construct the final detection tensors
       // expected a Map of filtered indices as input, from 'filter_by_score'
@@ -770,10 +790,17 @@ class InferenceObject {
         }
         
         if (kDebugMode) {
+          developer.log("Inspecting ${step.step} postprocessing variable: decodedData");
           developer.inspect(decodedData);
         }
         // This map of a list of maps becomes processedData for the next step
         processedOutput = decodedData;
+
+        if (kDebugMode) {
+          debugPrint("Finished ${step.step} postprocessing step.");
+          developer.log("Inspecting ${step.step} postprocessing output: processedOutput");
+          developer.inspect(processedOutput);
+        }
 
 
       default:

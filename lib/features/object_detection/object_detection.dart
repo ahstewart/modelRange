@@ -16,6 +16,7 @@ import 'package:riverpod_annotation/riverpod_annotation.dart';
 import '../../core/services/inferenceService.dart';
 import '../../core/data_models/pipeline.dart';
 import '../../core/utils/painters.dart';
+import 'dart:developer' as developer;
  
 
 // file purpose: this is the main widget for object detection, it will facilitate the capturing of images and running the inference of a model
@@ -127,7 +128,12 @@ class _ObjectDetectionWidgetState extends ConsumerState<ObjectDetectionWidget> {
 
       // run inference on selected image
       inferenceResults = await inferenceObject.performInference(inputMap);
-      debugPrint("Inference results = ${inferenceResults}");
+      if (kDebugMode) {
+        debugPrint("Inference completed.");
+        debugPrint("Inference results size: ${inferenceResults.length}");
+        debugPrint("Inference results type: ${inferenceResults.runtimeType}");
+        developer.inspect(inferenceResults);
+      }
     }
 
     catch (e) {
@@ -147,6 +153,7 @@ class _ObjectDetectionWidgetState extends ConsumerState<ObjectDetectionWidget> {
 
     // check that the inference resulted in actual outputs
     if (inferenceResults.isNotEmpty) {
+      debugPrint("Inference results is not empty, trying to set the recognitions variable.");
       /*// use the inference results to update the UI
       List<Map<String, dynamic>> recognitions = inferenceResults.values.first;
       // reorder the final recognitions by highest probability first
@@ -154,15 +161,24 @@ class _ObjectDetectionWidgetState extends ConsumerState<ObjectDetectionWidget> {
       recognitions.sort((a,b) => (b['score'] as double).compareTo(a['score'] as double));*/
 
       List<Map<String, dynamic>> recognitions = [];
-      var firstValue = inferenceResults.values.first;
-      if (firstValue is List<Map<String, dynamic>>) {
-        recognitions = firstValue;
+      var firstValue = inferenceResults;
+      if (firstValue is Map<String, dynamic>) {
+        recognitions.add(firstValue);
+        debugPrint("Successfully set recognitions to the inference results.");
+      }
+      else {
+        debugPrint("Inference results are not in the expected format. Setting recognitions to an empty map.");
+        recognitions = [{"original_index": 0, 
+                          "score": 0.0,
+                          "raw_box": [0,0,0,0],
+                          "label": "Error running model",}];
       }
       setState(() {
         _recognitions = recognitions;
       });
     }
     else {
+      debugPrint("Inference results are empty. Setting recognitions to an empty map.");
       setState(() {
         _recognitions = [{"original_index": 0, 
                           "score": 0.0,

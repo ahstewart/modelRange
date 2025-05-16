@@ -20,7 +20,7 @@ class DetectionBoxPainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     // Size here refers to the canvas size, which should match previewSize
     if (originalImageSize == Size.zero || previewSize == Size.zero || originalImageSize.width == 0 || originalImageSize.height == 0) {
-      print("DetectionBoxPainter: Invalid sizes, cannot paint. Original: $originalImageSize, Preview: $previewSize");
+      debugPrint("DetectionBoxPainter: Invalid sizes, cannot paint. Original: $originalImageSize, Preview: $previewSize");
       return; // Avoid division by zero or painting with invalid dimensions
     }
 
@@ -41,7 +41,7 @@ class DetectionBoxPainter extends CustomPainter {
       final double confidence = (recognition['confidence'] as num? ?? 0.0).toDouble();
 
       if (rawBox == null || rawBox.length != 4) {
-        print("DetectionBoxPainter: Skipping invalid raw_box: $rawBox");
+        debugPrint("DetectionBoxPainter: Skipping invalid raw_box: $rawBox");
         continue; // Skip if box data is invalid
       }
 
@@ -62,7 +62,7 @@ class DetectionBoxPainter extends CustomPainter {
 
       // Skip drawing if the rectangle is invalid or too small
       if (displayRect.width <= 0 || displayRect.height <= 0) {
-        print("DetectionBoxPainter: Skipping invalid displayRect: $displayRect");
+        debugPrint("DetectionBoxPainter: Skipping invalid displayRect: $displayRect");
         continue;
       }
 
