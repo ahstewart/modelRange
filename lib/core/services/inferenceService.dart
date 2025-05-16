@@ -11,6 +11,7 @@ import 'package:yaml/yaml.dart';
 import '../utils/list_extensions.dart';
 import '../utils/data_types.dart';
 import '../utils/math.dart';
+import 'dart:developer' as developer;
 
 
 // inference object that contains methods for loading models, pre and post processing, and running the actual inference
@@ -509,6 +510,10 @@ class InferenceObject {
       debugPrint("Running inference on model.");
     }
     _interpreter?.runForMultipleInputs(processedInputs, outputBuffers);
+    debugPrint("Inference completed.");
+    if (kDebugMode) {
+      developer.inspect(outputBuffers);
+    }
 
     // convert outputBuffers map to a String-keyed map using the output tensor names
     Map<String, dynamic> inferenceOutputs = {};
@@ -688,6 +693,7 @@ class InferenceObject {
         // set threshold according to YAML file, default to 0.5 if none found
         double threshold = (step.params['threshold'] as num?)?.toDouble() ?? 0.5;
         Map<int, List<int>> filteredDetectionIndices = {};
+        debugPrint("Filtering ${scoreTensor[0].length} detections with threshold $threshold...");
 
         // check if scoreTensor is a nested list
         /*debugPrint("Checking if scoreTensor type = ${scoreTensor.runtimeType} is a nested list.");
@@ -698,14 +704,21 @@ class InferenceObject {
         }*/
 
         for (int i = 0; i < scoreTensor.length; i++) {
+          filteredDetectionIndices[i] = <int>[]; // Initialize the list for each batch
           for (int j = 0; j < numDetections; j++) {
+            debugPrint("scoreTensor[$i][$j] = ${scoreTensor[i][j]}");
+            debugPrint("threshold = $threshold");
+            debugPrint("scoreTensor[$i][$j] > threshold = ${scoreTensor[i][j] > threshold}");
             if (scoreTensor[i][j] > threshold) {
-              filteredDetectionIndices[i]?[j] = scoreTensor[i][j];
+              filteredDetectionIndices[i]!.add(j);
             }
           }
         }
         
-        debugPrint("InferenceService: Filtered ${filteredDetectionIndices.length} detections above threshold $threshold");
+        debugPrint("InferenceService: Filtered ${filteredDetectionIndices[0]!.length} detections above threshold $threshold");
+        if (kDebugMode) {
+          developer.inspect(filteredDetectionIndices);
+        }
         // This step's output (filteredIndices) becomes processedData for the next step.
         processedOutput = filteredDetectionIndices;
 
@@ -724,18 +737,25 @@ class InferenceObject {
         }
         // define raw box Map, generalizing for multiple batch detection box tensors
         final Map<int, List<List<dynamic>>> boxesRaw = {};
+        debugPrint("Building boxesRaw map...");
         for (int i = 0; i < outputTensors[boxTensorName].length; i++) {
           boxesRaw[i] = outputTensors[boxTensorName][i];
         }
+        debugPrint("BoxesRaw map built successfully. \n $boxesRaw");
         debugPrint("Starting box decoding...");
         Map<int, List<Map<String, dynamic>>> decodedData = {};
         for (int i = 0; i < processedOutput.length; i++) {
+          debugPrint("Decoding boxes for batch $i...");
+          decodedData[i] = []; // Initialize the list for each batch
           for (int index in processedOutput[i]!) {
+            debugPrint("Decoding box $index for batch $i...");
             if (index < boxesRaw[i]!.length) {
+              // initialize the map for each detection
               // Convert box coordinates to double
               final box = boxesRaw[i]?[index].map((val) => (val as num).toDouble()).toList();
               if (box?.length == 4) { // Basic validation
-                decodedData[i]?.add({
+                debugPrint("Adding box coordinates: $box");
+                decodedData[i]!.add({
                   "original_index": index, // Preserve original index for later mapping
                   "score": scoreTensor[i]?[index],
                   "raw_box": box, // Pass raw normalized box [ymin, xmin, ymax, xmax] or other format
@@ -749,6 +769,9 @@ class InferenceObject {
           }
         }
         
+        if (kDebugMode) {
+          developer.inspect(decodedData);
+        }
         // This map of a list of maps becomes processedData for the next step
         processedOutput = decodedData;
 

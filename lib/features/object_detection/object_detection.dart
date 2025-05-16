@@ -182,6 +182,7 @@ class _ObjectDetectionWidgetState extends ConsumerState<ObjectDetectionWidget> {
           }
         }
       }
+      debugPrint("numResults set to $numResults.");
     } 
     catch (e) {
       debugPrint("Error setting numResults, maybe it's not in the pipeline YAML. Using default value of 3.");

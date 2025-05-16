@@ -67,7 +67,7 @@ postprocessing:
       # Filter out detections below a certain confidence level
       - step: filter_by_score
         params:
-          threshold: 0.5  # Threshold value used in the Flutter code example
+          threshold: 0.15  # Threshold value used in the Flutter code example
           # Specify which tensors provide the necessary info
           score_tensor: detection_scores
           num_detections_tensor: num_detections
