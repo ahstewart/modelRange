@@ -132,6 +132,7 @@ class _ObjectDetectionWidgetState extends ConsumerState<ObjectDetectionWidget> {
         debugPrint("Inference completed.");
         debugPrint("Inference results size: ${inferenceResults.length}");
         debugPrint("Inference results type: ${inferenceResults.runtimeType}");
+        developer.log("Inspecting final inferenceResults in Object Detection widget...");       
         developer.inspect(inferenceResults);
       }
     }
@@ -161,7 +162,7 @@ class _ObjectDetectionWidgetState extends ConsumerState<ObjectDetectionWidget> {
       recognitions.sort((a,b) => (b['score'] as double).compareTo(a['score'] as double));*/
 
       List<Map<String, dynamic>> recognitions = [];
-      var firstValue = inferenceResults;
+      var firstValue = inferenceResults.values.first;
       if (firstValue is Map<String, dynamic>) {
         recognitions.add(firstValue);
         debugPrint("Successfully set recognitions to the inference results.");

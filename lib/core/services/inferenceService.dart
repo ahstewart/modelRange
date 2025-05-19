@@ -211,11 +211,14 @@ class InferenceObject {
 
   // postprocess complete a postprocessing block and return a Map which will be the final inference result
   // the input to postprocess is the postprocessing block, the raw outputs map (source tensors), and the final result map
-  Future<dynamic> postprocess(Map<String, dynamic> rawOutputs, int postprocessBlockIndex, Map<String, dynamic> finalResults) async {
+  Future<dynamic> postprocess(Map<String, dynamic> rawOutputs, int postprocessBlockIndex) async {
     debugPrint("Starting postprocessing...");
+
     // declare some variables to make things easier
     ProcessingBlock block = modelPipeline!.postprocessing[postprocessBlockIndex];
     String outputName = block.output_name;
+    // declare a variable to track the current output
+    dynamic currentResult = rawOutputs[block.source_tensors[0]];
     
     debugPrint("Checking if the postprocessing block contains steps...");
     // make sure pipeline includes postprocessing steps? if it doesn't, skip all of this and return rawInput
@@ -223,7 +226,7 @@ class InferenceObject {
       if (kDebugMode) {
             debugPrint("Pipeline is missing postprocessing blocks, returning raw output unchanged.");
           }
-      return finalResults;
+      return currentResult;
     }
 
     debugPrint("Postprocessing block contained steps.");
@@ -234,16 +237,13 @@ class InferenceObject {
     for (var tensor in sourceTensors) {
       if (!rawOutputs.containsKey(tensor)) {
         if (kDebugMode) {
-            debugPrint("Output map does not contain source tensor: $tensor. Aborting postprocessing and returning final results map.");
+            debugPrint("Output map does not contain source tensor: $tensor. Aborting postprocessing and returning raw output unchanged.");
           }
-        return finalResults;
+        return currentResult;
       }
     }
 
     debugPrint("Source tensors present in all postprocessing blocks.");
-
-    // declare a variable to track the current output
-    dynamic currentResult = rawOutputs[block.source_tensors[0]];
 
     debugPrint("Executing steps for ${block.output_name}...");
     // start looping through the postprocessing steps
@@ -255,14 +255,17 @@ class InferenceObject {
       debugPrint("Postprocessing step ${postStep.step} completed successfully...");
     }
     
-    debugPrint("Postprocessing complete.");
+    if (kDebugMode) {
+      debugPrint("Postprocessing complete.");
+      developer.log("Inspecting postprocessing result for block ${modelPipeline!.postprocessing[postprocessBlockIndex].output_name}");
+      developer.inspect(currentResult);
+    }
 
-    debugPrint("Adding postprocessed result to the final results map.");
-    // add postprocessed result to the final results map
-    finalResults[modelPipeline!.postprocessing[postprocessBlockIndex].output_name] = (currentResult);
+
+    debugPrint("Adding result from postprocess block ${modelPipeline!.postprocessing[postprocessBlockIndex].output_name} to the final results map.");
 
     // return final output map
-    return finalResults;
+    return currentResult;
   }
 
 
@@ -531,7 +534,7 @@ class InferenceObject {
       // loop through the postprocessing blocks and run the postprocess method
       for (int i = 0; i < modelPipeline!.postprocessing.length; i++) {
         String blockName = modelPipeline!.postprocessing[i].output_name;
-        finalResults[blockName] = await postprocess(inferenceOutputs, i, finalResults);
+        finalResults[blockName] = await postprocess(inferenceOutputs, i);
         if (kDebugMode) {
           debugPrint("Postprocessing block ${modelPipeline!.postprocessing[i].output_name} completed.");
         }
@@ -542,6 +545,11 @@ class InferenceObject {
         debugPrint("No postprocessing blocks found in pipeline, returning raw output.");
       }
       finalResults = inferenceOutputs;
+    }
+
+    if (kDebugMode) {
+      developer.log("Postprocessing complete, inspecting the finalResults output...");
+      developer.inspect(finalResults);
     }
     
     // return the final results map
@@ -663,7 +671,7 @@ class InferenceObject {
           processedOutput = recognitions;
           if (kDebugMode) {
             debugPrint("Finished ${step.step} postprocessing step.");
-            developer.log("Inspecting ${step.step} postprocessing output:n processedOutput");
+            developer.log("Inspecting ${step.step} postprocessing output: processedOutput");
             developer.inspect(processedOutput);
           }
         // filters object detections by some threshold

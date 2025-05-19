@@ -36,7 +36,9 @@ class DetectionBoxPainter extends CustomPainter {
     for (int i = 0; i < recognitions.length; i++) {
       final recognition = recognitions[i];
       // Extract data safely
-      final List<double>? rawBox = (recognition['raw_box'] as List<dynamic>?)?.cast<double>();
+      final List<double>? rawBox = (recognition['raw_box'] as List<dynamic>?)
+        ?.map((e) => (e as num).toDouble())
+        .toList();
       final String label = recognition['label'] as String? ?? 'N/A';
       final double confidence = (recognition['confidence'] as num? ?? 0.0).toDouble();
 
