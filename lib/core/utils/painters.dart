@@ -24,6 +24,7 @@ class DetectionBoxPainter extends CustomPainter {
       return; // Avoid division by zero or painting with invalid dimensions
     }
 
+    debugPrint("DetectionBoxPainter: Calculating scaling factors...");
     // Calculate scaling factors based on BoxFit.contain logic
     final double scaleX = previewSize.width / originalImageSize.width;
     final double scaleY = previewSize.height / originalImageSize.height;
@@ -39,13 +40,16 @@ class DetectionBoxPainter extends CustomPainter {
       final List<double>? rawBox = (recognition['raw_box'] as List<dynamic>?)
         ?.map((e) => (e as num).toDouble())
         .toList();
+      debugPrint("DetectionBoxPainter: Raw rawBox value = ${recognition['raw_box']}");
       final String label = recognition['label'] as String? ?? 'N/A';
-      final double confidence = (recognition['confidence'] as num? ?? 0.0).toDouble();
+      final double confidence = (recognition['score'] as num? ?? 0.0).toDouble();
 
       if (rawBox == null || rawBox.length != 4) {
         debugPrint("DetectionBoxPainter: Skipping invalid raw_box: $rawBox");
         continue; // Skip if box data is invalid
       }
+
+      debugPrint("DetectionBoxPainter: Raw box extracted = $rawBox");
 
       // Assuming raw_box is [ymin, xmin, ymax, xmax] normalized coordinates (0.0 to 1.0)
       // Scale coordinates to original image dimensions first
@@ -54,6 +58,8 @@ class DetectionBoxPainter extends CustomPainter {
       final double imgYMax = rawBox[2] * originalImageSize.height;
       final double imgXMax = rawBox[3] * originalImageSize.width;
 
+      debugPrint("DetectionBoxPainter: Calculated scaled coords = imgYMin ($imgYMin), imgXMin ($imgXMin), imgYMax ($imgYMax), imgXMan ($imgXMax)");
+
       // Scale and offset coordinates to match the preview display
       final Rect displayRect = Rect.fromLTRB(
         max(0, imgXMin * scale + offsetX), // Ensure rect starts within canvas
@@ -61,6 +67,8 @@ class DetectionBoxPainter extends CustomPainter {
         min(previewSize.width, imgXMax * scale + offsetX), // Ensure rect ends within canvas
         min(previewSize.height, imgYMax * scale + offsetY),
       );
+
+      debugPrint("DetectionBoxPainter: Calculated displayRect = $displayRect...");
 
       // Skip drawing if the rectangle is invalid or too small
       if (displayRect.width <= 0 || displayRect.height <= 0) {

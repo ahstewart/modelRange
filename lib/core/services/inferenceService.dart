@@ -636,10 +636,14 @@ class InferenceObject {
         if (processedOutput is Map) {
           debugPrint("Mapping labels assuming object detection task.");
           // loop through detection batches
+
           for (int i = 0; i < processedOutput.length; i++) {
+            int detectionCount = 1;
             // loop through detections
             for (var detectionMap in processedOutput[i]!) {
+              debugPrint("Mapping label ${_labels?[detectionMap['original_index']]} to detection $detectionCount");
               detectionMap['label'] = _labels?[detectionMap['original_index']];
+              detectionCount++;
             }
           }
         }

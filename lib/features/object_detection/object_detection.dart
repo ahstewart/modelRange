@@ -162,18 +162,12 @@ class _ObjectDetectionWidgetState extends ConsumerState<ObjectDetectionWidget> {
       recognitions.sort((a,b) => (b['score'] as double).compareTo(a['score'] as double));*/
 
       List<Map<String, dynamic>> recognitions = [];
-      var firstValue = inferenceResults.values.first;
-      if (firstValue is Map<String, dynamic>) {
-        recognitions.add(firstValue);
-        debugPrint("Successfully set recognitions to the inference results.");
+      recognitions = inferenceResults.values.first.values.first;
+      if (kDebugMode) {
+        developer.log("Inspecting final recognitions variable...");
+        developer.inspect(recognitions);
       }
-      else {
-        debugPrint("Inference results are not in the expected format. Setting recognitions to an empty map.");
-        recognitions = [{"original_index": 0, 
-                          "score": 0.0,
-                          "raw_box": [0,0,0,0],
-                          "label": "Error running model",}];
-      }
+
       setState(() {
         _recognitions = recognitions;
       });
