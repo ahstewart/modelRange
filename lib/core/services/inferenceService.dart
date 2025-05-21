@@ -15,7 +15,7 @@ import 'dart:developer' as developer;
 
 
 // inference object that contains methods for loading models, pre and post processing, and running the actual inference
-class InferenceObject {
+class InferenceService {
   // initialize interpreter, pipeline (metadata), etc
   Interpreter? _interpreter;
   Pipeline? modelPipeline;
@@ -28,7 +28,7 @@ class InferenceObject {
   final String modelPath;
   final String pipelinePath;
 
-  InferenceObject({
+  InferenceService({
     required this.modelPath,
     required this.pipelinePath,
   }) 

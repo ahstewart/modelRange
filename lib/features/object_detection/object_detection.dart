@@ -44,7 +44,7 @@ class ObjectDetectionWidget extends ConsumerStatefulWidget {
 
 class _ObjectDetectionWidgetState extends ConsumerState<ObjectDetectionWidget> {
   // instantiate the model inference object
-  late final InferenceObject inferenceObject;
+  late final InferenceService inferenceObject;
   bool _isLoading = false;
   File? _selectedImage;
   img.Image? _decodedImage;
@@ -65,7 +65,7 @@ class _ObjectDetectionWidgetState extends ConsumerState<ObjectDetectionWidget> {
   @override
   void initState() {
     super.initState();
-    inferenceObject = InferenceObject(
+    inferenceObject = InferenceService(
       modelPath: widget.modelName,
       pipelinePath: widget.pipelinePath
     );
