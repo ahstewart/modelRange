@@ -616,7 +616,6 @@ class InferenceObject {
           developer.inspect(processedOutput);
         }
 
-      // WORKING ON REFACTORING TO SUPPORT DETECTION
       // map raw or activated outputs to a set of labels for classification
       case 'map_labels':
         // load labels into memory
@@ -630,19 +629,29 @@ class InferenceObject {
         catch (e) {
           throw Exception("Failed fetching classification labels from $step.params['labels_url']: $e");
         }
+
         // check whether task is classification or object detection
         // image classification map_labels takes a List of floats as input
         // object detection map_labels takes a Map<int, List<Map<String, dynamic>>>
+        
         if (processedOutput is Map) {
           debugPrint("Mapping labels assuming object detection task.");
-          // loop through detection batches
+          
+          // grabbing detection class index tensor for label mapping
+          String detectionClassTensorName = step.params['class_tensor'];
+          dynamic detectionClassTensor = outputTensors[detectionClassTensorName];
+          if (kDebugMode) {
+            developer.log("Inspecting detection class tensor...");
+            developer.inspect(detectionClassTensor);
+          }
 
+          // loop through detection batches
           for (int i = 0; i < processedOutput.length; i++) {
             int detectionCount = 1;
             // loop through detections
             for (var detectionMap in processedOutput[i]!) {
               debugPrint("Mapping label ${_labels?[detectionMap['original_index']]} to detection $detectionCount");
-              detectionMap['label'] = _labels?[detectionMap['original_index']];
+              detectionMap['label'] = _labels?[detectionClassTensor[0][detectionMap['original_index']].toInt()];
               detectionCount++;
             }
           }
@@ -653,6 +662,13 @@ class InferenceObject {
           List<Map<String, dynamic>> recognitions = [];
           // declare tempOutput
           List<dynamic> tempOutput = [];
+          // grabbing classification class index tensor for label mapping
+          String classTensorName = step.params['class_tensor'];
+          dynamic classTensor = outputTensors[classTensorName];
+          if (kDebugMode) {
+            developer.log("Inspecting classification class tensor...");
+            developer.inspect(classTensor);
+          }
           // check if processedOutput is a nested list
           debugPrint("Checking if processedOutput type = ${processedOutput.runtimeType} is a nested list.");
           if (isNestedList(processedOutput)) {
@@ -673,13 +689,13 @@ class InferenceObject {
           }
           // set the processed output to the recognition list
           processedOutput = recognitions;
-          if (kDebugMode) {
-            debugPrint("Finished ${step.step} postprocessing step.");
-            developer.log("Inspecting ${step.step} postprocessing output: processedOutput");
-            developer.inspect(processedOutput);
-          }
         // filters object detections by some threshold
         // expects a tensor, or a List<dynamic> in Dart
+        }
+        if (kDebugMode) {
+          debugPrint("Finished ${step.step} postprocessing step.");
+          developer.log("Inspecting ${step.step} postprocessing output: processedOutput");
+          developer.inspect(processedOutput);
         }
        
       // filters object detections by some threshold
@@ -720,14 +736,7 @@ class InferenceObject {
         Map<int, List<int>> filteredDetectionIndices = {};
         debugPrint("Filtering ${scoreTensor[0].length} detections with threshold $threshold...");
 
-        // check if scoreTensor is a nested list
-        /*debugPrint("Checking if scoreTensor type = ${scoreTensor.runtimeType} is a nested list.");
-        if (isNestedList(scoreTensor)) {
-          debugPrint("Flattening scoreTensor nested List.");
-          List<dynamic> tempTensor = scoreTensor.expand((x) => x as Iterable).toList();
-          scoreTensor = tempTensor;
-        }*/
-
+        // loop through each batch of score tensors
         for (int i = 0; i < scoreTensor.length; i++) {
           filteredDetectionIndices[i] = <int>[]; // Initialize the list for each batch
           for (int j = 0; j < numDetections; j++) {
