@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -95,7 +94,9 @@ class _TextToImageWidgetState extends ConsumerState<TextToImageWidget> {
         setState(() => _imagePngBytes = Uint8List.fromList(pngBytes));
       } else if (firstResult != null) {
         if (kDebugMode) {
-          debugPrint('[TextToImage] Unexpected result type: ${firstResult.runtimeType}');
+          debugPrint(
+            '[TextToImage] Unexpected result type: ${firstResult.runtimeType}',
+          );
         }
       }
     } catch (e) {
@@ -104,10 +105,13 @@ class _TextToImageWidgetState extends ConsumerState<TextToImageWidget> {
       _elapsedTimer?.cancel();
       _elapsedTimer = null;
       if (widget.modelVersionId != null) {
-        ref.read(telemetryServiceProvider).syncIfEligible(
-          optedIn: ref.read(telemetryOptInProvider),
-          authToken: null,
-        ).ignore();
+        ref
+            .read(telemetryServiceProvider)
+            .syncIfEligible(
+              optedIn: ref.read(telemetryOptInProvider),
+              authToken: null,
+            )
+            .ignore();
       }
       setState(() => _isLoading = false);
     }
@@ -137,16 +141,16 @@ class _TextToImageWidgetState extends ConsumerState<TextToImageWidget> {
           const SizedBox(height: 16),
           Text(
             'Generating image\u2026',
-            style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-              fontWeight: FontWeight.w500,
-            ),
+            style: Theme.of(
+              context,
+            ).textTheme.bodyLarge?.copyWith(fontWeight: FontWeight.w500),
           ),
           const SizedBox(height: 4),
           Text(
             _formatElapsed(_elapsedSeconds),
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-              color: cs.onSurfaceVariant,
-            ),
+            style: Theme.of(
+              context,
+            ).textTheme.bodySmall?.copyWith(color: cs.onSurfaceVariant),
           ),
         ],
       ),
@@ -159,7 +163,9 @@ class _TextToImageWidgetState extends ConsumerState<TextToImageWidget> {
       future: _initFuture,
       builder: (context, snapshot) {
         if (snapshot.connectionState != ConnectionState.done) {
-          return const Scaffold(body: Center(child: CircularProgressIndicator()));
+          return const Scaffold(
+            body: Center(child: CircularProgressIndicator()),
+          );
         }
         if (snapshot.hasError) {
           return const Scaffold(
@@ -211,14 +217,15 @@ class _TextToImageWidgetState extends ConsumerState<TextToImageWidget> {
               const SizedBox(height: 16),
               AnimatedSwitcher(
                 duration: const Duration(milliseconds: 300),
-                child: _isLoading
-                    ? _buildLoadingCard(context)
-                    : ElevatedButton.icon(
-                        key: const ValueKey('generate-btn'),
-                        onPressed: _runGeneration,
-                        icon: const Icon(Icons.image_outlined),
-                        label: const Text('Generate Image'),
-                      ),
+                child:
+                    _isLoading
+                        ? _buildLoadingCard(context)
+                        : ElevatedButton.icon(
+                          key: const ValueKey('generate-btn'),
+                          onPressed: _runGeneration,
+                          icon: const Icon(Icons.image_outlined),
+                          label: const Text('Generate Image'),
+                        ),
               ),
               const SizedBox(height: 24),
               if (_imagePngBytes != null) ...[

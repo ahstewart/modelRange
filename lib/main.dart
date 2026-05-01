@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:io';
 
-
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 //import 'package:freezed_annotation/freezed_annotation.dart';
@@ -70,13 +69,19 @@ Future<void> main() async {
       );
 
       await DeviceInfoHelper.init();
+      final prefs = await SharedPreferences.getInstance();
 
       FlutterError.onError = (FlutterErrorDetails details) {
         FlutterError.presentError(details); // Still show red screen in debug
         debugPrint('Caught by global error handler: ${details.exception}');
       };
 
-      runApp(ProviderScope(child: const MyApp()));
+      runApp(
+        ProviderScope(
+          overrides: [sharedPreferencesProvider.overrideWithValue(prefs)],
+          child: const MyApp(),
+        ),
+      );
     },
     (error, stackTrace) {
       debugPrint('Uncaught async error: $error');
@@ -294,58 +299,167 @@ class DownloadedModel {
     'localPath': localPath,
   };
 
-  static DownloadedModel fromJson(Map<String, dynamic> json) => DownloadedModel(
-    modelId: json['modelId'],
-    modelName: json['modelName'],
-    versionName: json['versionName'],
-    versionId: json['versionId'],
-    category: json['category'],
-    modelCategory: json['modelCategory'] ?? 'other',
-    downloadedAt: DateTime.parse(json['downloadedAt']),
-    localPath: json['localPath'],
-  );
+  static DownloadedModel? tryFromJson(Map<String, dynamic> json) {
+    try {
+      return DownloadedModel(
+        modelId: json['modelId'] as String? ?? '',
+        modelName: json['modelName'] as String? ?? 'Unknown',
+        versionName: json['versionName'] as String? ?? '',
+        versionId: json['versionId'] as String? ?? '',
+        category: json['category'] as String? ?? 'unknown',
+        modelCategory: json['modelCategory'] as String? ?? 'other',
+        downloadedAt:
+            json['downloadedAt'] != null
+                ? DateTime.tryParse(json['downloadedAt'] as String) ??
+                    DateTime.now()
+                : DateTime.now(),
+        localPath: json['localPath'] as String? ?? '',
+      );
+    } catch (e) {
+      debugPrint('[DownloadedModel] Skipping bad entry: $e');
+      return null;
+    }
+  }
+}
+
+final sharedPreferencesProvider = Provider<SharedPreferences>(
+  (_) =>
+      throw UnimplementedError(
+        'sharedPreferencesProvider must be overridden in main()',
+      ),
+);
+
+class DownloadedModelsState {
+  final List<DownloadedModel> models;
+  final bool isLoaded;
+  const DownloadedModelsState({required this.models, required this.isLoaded});
 }
 
 // Provider for managing downloaded models
 final downloadedModelsProvider =
-    StateNotifierProvider<DownloadedModelsNotifier, List<DownloadedModel>>(
-      (ref) => DownloadedModelsNotifier(),
+    StateNotifierProvider<DownloadedModelsNotifier, DownloadedModelsState>(
+      (ref) => DownloadedModelsNotifier(ref.watch(sharedPreferencesProvider)),
     );
 
-class DownloadedModelsNotifier extends StateNotifier<List<DownloadedModel>> {
+class DownloadedModelsNotifier extends StateNotifier<DownloadedModelsState> {
   static const _prefsKey = 'downloaded_models_v1';
+  final SharedPreferences _prefs;
 
-  DownloadedModelsNotifier() : super([]) {
-    _loadDownloadedModels();
+  DownloadedModelsNotifier(this._prefs)
+    : super(const DownloadedModelsState(models: [], isLoaded: false)) {
+    _initialize();
+  }
+
+  Future<void> _initialize() async {
+    await _loadDownloadedModels();
+    await _scanDiskForMissingModels();
+    if (mounted)
+      state = DownloadedModelsState(models: state.models, isLoaded: true);
   }
 
   Future<void> _loadDownloadedModels() async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final raw = prefs.getString(_prefsKey);
+      final raw = _prefs.getString(_prefsKey);
       if (raw == null) return;
       final list = (jsonDecode(raw) as List).cast<Map<String, dynamic>>();
-      if (mounted) state = list.map(DownloadedModel.fromJson).toList();
-    } catch (_) {}
+      if (mounted) {
+        state = DownloadedModelsState(
+          models:
+              list
+                  .map(DownloadedModel.tryFromJson)
+                  .whereType<DownloadedModel>()
+                  .toList(),
+          isLoaded: false,
+        );
+      }
+    } catch (e, st) {
+      debugPrint('[DownloadedModels] Failed to load from prefs: $e\n$st');
+    }
+  }
+
+  Future<void> _scanDiskForMissingModels() async {
+    try {
+      final appDir = await getApplicationDocumentsDirectory();
+      final root = Directory('${appDir.path}/downloaded_models');
+      if (!await root.exists()) return;
+
+      final knownIds = state.models.map((m) => m.versionId).toSet();
+      final recovered = <DownloadedModel>[];
+
+      await for (final entity in root.list()) {
+        if (entity is! Directory) continue;
+        final versionId = entity.path.split(Platform.pathSeparator).last;
+        if (knownIds.contains(versionId)) continue;
+
+        final specFile = File('${entity.path}/pipeline_spec.json');
+        if (!await specFile.exists()) continue;
+
+        try {
+          final spec =
+              jsonDecode(await specFile.readAsString()) as Map<String, dynamic>;
+          final metadata =
+              (spec['metadata'] as List?)?.first as Map<String, dynamic>?;
+          final task = metadata?['model_task'] as String? ?? 'unknown';
+          final modelName = metadata?['model_name'] as String? ?? 'Unknown';
+
+          recovered.add(
+            DownloadedModel(
+              modelId: '',
+              modelName: modelName,
+              versionName: '',
+              versionId: versionId,
+              category: task,
+              modelCategory: 'other',
+              downloadedAt: (await entity.stat()).modified,
+              localPath: entity.path,
+            ),
+          );
+        } catch (e) {
+          debugPrint(
+            '[DownloadedModels] Could not recover $versionId from disk: $e',
+          );
+        }
+      }
+
+      if (recovered.isNotEmpty && mounted) {
+        state = DownloadedModelsState(
+          models: [...state.models, ...recovered],
+          isLoaded: false,
+        );
+        await _persist();
+        debugPrint(
+          '[DownloadedModels] Recovered ${recovered.length} model(s) from disk.',
+        );
+      }
+    } catch (e, st) {
+      debugPrint('[DownloadedModels] Disk scan failed: $e\n$st');
+    }
   }
 
   Future<void> _persist() async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString(
+      await _prefs.setString(
         _prefsKey,
-        jsonEncode(state.map((m) => m.toJson()).toList()),
+        jsonEncode(state.models.map((m) => m.toJson()).toList()),
       );
-    } catch (_) {}
+    } catch (e, st) {
+      debugPrint('[DownloadedModels] Failed to persist: $e\n$st');
+    }
   }
 
   void addDownloadedModel(DownloadedModel model) {
-    state = [...state, model];
+    state = DownloadedModelsState(
+      models: [...state.models, model],
+      isLoaded: true,
+    );
     _persist();
   }
 
   void removeDownloadedModel(String versionId) {
-    state = state.where((m) => m.versionId != versionId).toList();
+    state = DownloadedModelsState(
+      models: state.models.where((m) => m.versionId != versionId).toList(),
+      isLoaded: true,
+    );
     _persist();
   }
 }
@@ -411,8 +525,9 @@ IconData _taskIcon(String task) {
   if (task.contains('classif')) return Icons.image_search;
   if (task.contains('detect')) return Icons.center_focus_strong;
   if (task.contains('segment')) return Icons.blur_circular;
-  if (task.contains('text') || task.contains('generat'))
+  if (task.contains('text') || task.contains('generat')) {
     return Icons.text_fields;
+  }
   if (task.contains('speech') ||
       task.contains('audio') ||
       task.contains('asr')) {
@@ -427,11 +542,16 @@ IconData _taskIcon(String task) {
   if (task.contains('text') || task.contains('generat')) {
     return (const Color(0xFFCCFBF1), const Color(0xFF134E4A)); // teal container
   }
-  if (task.contains('speech') || task.contains('audio') || task.contains('asr')) {
+  if (task.contains('speech') ||
+      task.contains('audio') ||
+      task.contains('asr')) {
     return (const Color(0xFFDBEAFE), const Color(0xFF1E3A8A)); // blue container
   }
   if (task == 'image_to_text' || task == 'image-to-text') {
-    return (const Color(0xFFEDE9FE), const Color(0xFF3730A3)); // violet container
+    return (
+      const Color(0xFFEDE9FE),
+      const Color(0xFF3730A3),
+    ); // violet container
   }
   if (task == 'text_to_image' || task == 'text-to-image') {
     return (const Color(0xFFFCE7F3), const Color(0xFF831843)); // pink container
@@ -441,8 +561,7 @@ IconData _taskIcon(String task) {
 
 /// Returns the best pipeline status for a model, using the pre-computed
 /// backend field best_version_status.
-String _bestStatus(MLModel model) =>
-    model.best_version_status ?? 'missing';
+String _bestStatus(MLModel model) => model.best_version_status ?? 'missing';
 
 String _friendlyTask(String category) => category
     .split('_')
@@ -634,8 +753,8 @@ class _ModelsState extends ConsumerState<Models> {
                         child: FilterChip(
                           label: Text(entry.$2),
                           selected: _selectedStatus == entry.$1,
-                          onSelected: (_) =>
-                              setState(() => _selectedStatus = entry.$1),
+                          onSelected:
+                              (_) => setState(() => _selectedStatus = entry.$1),
                         ),
                       ),
                   ],
@@ -666,10 +785,11 @@ class _ModelsState extends ConsumerState<Models> {
         );
       },
       loading: () => const Center(child: CircularProgressIndicator()),
-      error: (err, stack) => _ApiErrorWidget(
-        err: err,
-        onRetry: () => ref.invalidate(supportedModelsProvider),
-      ),
+      error:
+          (err, stack) => _ApiErrorWidget(
+            err: err,
+            onRetry: () => ref.invalidate(supportedModelsProvider),
+          ),
     );
   }
 
@@ -694,7 +814,8 @@ class _ApiErrorWidget extends StatelessWidget {
     final theme = Theme.of(context);
     final cs = theme.colorScheme;
 
-    final bool isOffline = err is ApiConnectionException ||
+    final bool isOffline =
+        err is ApiConnectionException ||
         err is ApiTimeoutException ||
         err.toString().toLowerCase().contains('socket') ||
         err.toString().toLowerCase().contains('connection refused');
@@ -724,14 +845,12 @@ class _ApiErrorWidget extends StatelessWidget {
             Text(
               message,
               textAlign: TextAlign.center,
-              style: theme.textTheme.bodyMedium
-                  ?.copyWith(color: cs.onSurfaceVariant),
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: cs.onSurfaceVariant,
+              ),
             ),
             const SizedBox(height: 24),
-            FilledButton.tonal(
-              onPressed: onRetry,
-              child: const Text('Retry'),
-            ),
+            FilledButton.tonal(onPressed: onRetry, child: const Text('Retry')),
           ],
         ),
       ),
@@ -828,75 +947,105 @@ class _ModelCard extends StatelessWidget {
                     Row(
                       children: [
                         // Downloads
-                        Icon(Icons.download_outlined, size: 12, color: cs.onSurfaceVariant),
+                        Icon(
+                          Icons.download_outlined,
+                          size: 12,
+                          color: cs.onSurfaceVariant,
+                        ),
                         const SizedBox(width: 3),
                         Text(
                           _formatCount(model.total_download_count),
-                          style: theme.textTheme.labelSmall?.copyWith(color: cs.onSurfaceVariant),
+                          style: theme.textTheme.labelSmall?.copyWith(
+                            color: cs.onSurfaceVariant,
+                          ),
                         ),
                         // Rating
                         if (model.total_ratings > 0) ...[
                           const SizedBox(width: 8),
-                          Icon(Icons.star_rounded, size: 12, color: Colors.amber[700]),
+                          Icon(
+                            Icons.star_rounded,
+                            size: 12,
+                            color: Colors.amber[700],
+                          ),
                           const SizedBox(width: 3),
                           Text(
                             model.rating_weighted_avg.toStringAsFixed(1),
-                            style: theme.textTheme.labelSmall?.copyWith(color: cs.onSurfaceVariant),
+                            style: theme.textTheme.labelSmall?.copyWith(
+                              color: cs.onSurfaceVariant,
+                            ),
                           ),
                         ],
                         // Version count
                         if (model.version_count > 0) ...[
                           const SizedBox(width: 8),
-                          Icon(Icons.layers_outlined, size: 12, color: cs.onSurfaceVariant),
+                          Icon(
+                            Icons.layers_outlined,
+                            size: 12,
+                            color: cs.onSurfaceVariant,
+                          ),
                           const SizedBox(width: 3),
                           Text(
                             '${model.version_count}',
-                            style: theme.textTheme.labelSmall?.copyWith(color: cs.onSurfaceVariant),
+                            style: theme.textTheme.labelSmall?.copyWith(
+                              color: cs.onSurfaceVariant,
+                            ),
                           ),
                         ],
                         // Status dot
                         ...[
                           const SizedBox(width: 8),
-                          Builder(builder: (context) {
-                            final status = _bestStatus(model);
-                            final color = status == 'verified'
-                                ? Colors.green[600]!
-                                : status == 'pending'
-                                    ? Colors.amber[700]!
-                                    : cs.outlineVariant;
-                            final label = status == 'verified'
-                                ? 'Verified'
-                                : status == 'pending'
-                                    ? 'Pending'
-                                    : 'Missing';
-                            return Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Container(
-                                  width: 6,
-                                  height: 6,
-                                  decoration: BoxDecoration(
-                                    color: color,
-                                    shape: BoxShape.circle,
+                          Builder(
+                            builder: (context) {
+                              final status = _bestStatus(model);
+                              final color =
+                                  status == 'verified'
+                                      ? Colors.green[600]!
+                                      : status == 'pending'
+                                      ? Colors.amber[700]!
+                                      : cs.outlineVariant;
+                              final label =
+                                  status == 'verified'
+                                      ? 'Verified'
+                                      : status == 'pending'
+                                      ? 'Pending'
+                                      : 'Missing';
+                              return Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Container(
+                                    width: 6,
+                                    height: 6,
+                                    decoration: BoxDecoration(
+                                      color: color,
+                                      shape: BoxShape.circle,
+                                    ),
                                   ),
-                                ),
-                                const SizedBox(width: 3),
-                                Text(
-                                  label,
-                                  style: theme.textTheme.labelSmall?.copyWith(color: color),
-                                ),
-                              ],
-                            );
-                          }),
+                                  const SizedBox(width: 3),
+                                  Text(
+                                    label,
+                                    style: theme.textTheme.labelSmall?.copyWith(
+                                      color: color,
+                                    ),
+                                  ),
+                                ],
+                              );
+                            },
+                          ),
                         ],
                         // File size
                         if (model.file_size_bytes > 0) ...[
                           const SizedBox(width: 8),
-                          Icon(Icons.sd_storage_outlined, size: 12, color: cs.onSurfaceVariant),
+                          Icon(
+                            Icons.sd_storage_outlined,
+                            size: 12,
+                            color: cs.onSurfaceVariant,
+                          ),
                           const SizedBox(width: 3),
                           Text(
                             _formatBytes(model.file_size_bytes),
-                            style: theme.textTheme.labelSmall?.copyWith(color: cs.onSurfaceVariant),
+                            style: theme.textTheme.labelSmall?.copyWith(
+                              color: cs.onSurfaceVariant,
+                            ),
                           ),
                         ],
                       ],
@@ -1109,7 +1258,7 @@ class _VersionTile extends ConsumerStatefulWidget {
 class _VersionTileState extends ConsumerState<_VersionTile> {
   @override
   Widget build(BuildContext context) {
-    final downloaded = ref.watch(downloadedModelsProvider);
+    final downloaded = ref.watch(downloadedModelsProvider).models;
     final isDownloaded = downloaded.any(
       (m) => m.versionId == widget.version.id,
     );
@@ -1166,6 +1315,7 @@ class _VersionTileState extends ConsumerState<_VersionTile> {
                         onPressed: () {
                           final dm = ref
                               .read(downloadedModelsProvider)
+                              .models
                               .firstWhere(
                                 (m) => m.versionId == widget.version.id,
                               );
@@ -1345,7 +1495,7 @@ class RangeTab extends ConsumerWidget {
 
     // check if no model has been selected
     if (selectedModel == null) {
-      final downloaded = ref.watch(downloadedModelsProvider);
+      final downloaded = ref.watch(downloadedModelsProvider).models;
       final hasDownloads = downloaded.isNotEmpty;
       final theme = Theme.of(context);
       final cs = theme.colorScheme;
@@ -1361,8 +1511,9 @@ class RangeTab extends ConsumerWidget {
               Text(
                 'Take a model out on the range',
                 textAlign: TextAlign.center,
-                style: theme.textTheme.bodyMedium
-                    ?.copyWith(color: cs.onSurfaceVariant),
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: cs.onSurfaceVariant,
+                ),
               ),
               const SizedBox(height: 24),
               FilledButton.tonal(
@@ -1900,7 +2051,7 @@ class _DownloadedModelsState extends ConsumerState<DownloadedModels> {
   }
 
   void _invalidateStats() {
-    final models = ref.read(downloadedModelsProvider);
+    final models = ref.read(downloadedModelsProvider).models;
     for (final m in models) {
       ref.invalidate(versionStatSummaryProvider(m.versionId));
       ref.invalidate(versionStatsProvider(m.versionId));
@@ -1909,7 +2060,8 @@ class _DownloadedModelsState extends ConsumerState<DownloadedModels> {
 
   @override
   Widget build(BuildContext context) {
-    final downloadedModels = ref.watch(downloadedModelsProvider);
+    final dmState = ref.watch(downloadedModelsProvider);
+    final downloadedModels = dmState.models;
     final inProgress = ref.watch(inProgressDownloadsProvider);
     final theme = Theme.of(context);
     final cs = theme.colorScheme;
@@ -1944,7 +2096,13 @@ class _DownloadedModelsState extends ConsumerState<DownloadedModels> {
         Expanded(
           child:
               _viewIndex == 0
-                  ? _buildModelsView(context, downloadedModels, inProgress, cs)
+                  ? _buildModelsView(
+                    context,
+                    downloadedModels,
+                    inProgress,
+                    cs,
+                    isLoaded: dmState.isLoaded,
+                  )
                   : _buildStatsView(context, downloadedModels, theme, cs),
         ),
       ],
@@ -1955,8 +2113,12 @@ class _DownloadedModelsState extends ConsumerState<DownloadedModels> {
     BuildContext context,
     List<DownloadedModel> downloadedModels,
     Map<String, InProgressDownload> inProgress,
-    ColorScheme cs,
-  ) {
+    ColorScheme cs, {
+    required bool isLoaded,
+  }) {
+    if (!isLoaded && inProgress.isEmpty) {
+      return const Center(child: CircularProgressIndicator());
+    }
     if (downloadedModels.isEmpty && inProgress.isEmpty) {
       return Center(
         child: Column(
@@ -2506,31 +2668,37 @@ class Profile extends ConsumerWidget {
                   const SizedBox(height: 8),
                   Text(
                     'Sign in to sync inference telemetry and access your account across devices.',
-                    style: theme.textTheme.bodySmall
-                        ?.copyWith(color: cs.onSurfaceVariant),
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: cs.onSurfaceVariant,
+                    ),
                   ),
                   const SizedBox(height: 16),
                   Row(
                     children: [
                       Expanded(
                         child: FilledButton(
-                          onPressed: () => showDialog<void>(
-                            context: context,
-                            builder: (_) =>
-                                const _AuthDialog(initialMode: _AuthMode.signIn),
-                          ),
+                          onPressed:
+                              () => showDialog<void>(
+                                context: context,
+                                builder:
+                                    (_) => const _AuthDialog(
+                                      initialMode: _AuthMode.signIn,
+                                    ),
+                              ),
                           child: const Text('Sign in'),
                         ),
                       ),
                       const SizedBox(width: 12),
                       Expanded(
                         child: OutlinedButton(
-                          onPressed: () => showDialog<void>(
-                            context: context,
-                            builder: (_) => const _AuthDialog(
-                              initialMode: _AuthMode.createAccount,
-                            ),
-                          ),
+                          onPressed:
+                              () => showDialog<void>(
+                                context: context,
+                                builder:
+                                    (_) => const _AuthDialog(
+                                      initialMode: _AuthMode.createAccount,
+                                    ),
+                              ),
                           child: const Text('Create account'),
                         ),
                       ),
@@ -2551,8 +2719,9 @@ class Profile extends ConsumerWidget {
                     radius: 20,
                     child: Text(
                       (user.email ?? '?')[0].toUpperCase(),
-                      style: theme.textTheme.titleMedium
-                          ?.copyWith(color: cs.primary),
+                      style: theme.textTheme.titleMedium?.copyWith(
+                        color: cs.primary,
+                      ),
                     ),
                   ),
                   const SizedBox(width: 12),
@@ -2562,13 +2731,15 @@ class Profile extends ConsumerWidget {
                       children: [
                         Text(
                           user.email ?? 'Jacana user',
-                          style: theme.textTheme.bodyMedium
-                              ?.copyWith(fontWeight: FontWeight.w600),
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            fontWeight: FontWeight.w600,
+                          ),
                         ),
                         Text(
                           'Signed in',
-                          style: theme.textTheme.bodySmall
-                              ?.copyWith(color: cs.onSurfaceVariant),
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: cs.onSurfaceVariant,
+                          ),
                         ),
                       ],
                     ),
@@ -2747,16 +2918,22 @@ class _AuthDialogState extends ConsumerState<_AuthDialog> {
     } on AuthException catch (e) {
       setState(() => _error = e.message);
     } on SocketException {
-      setState(() => _error = "Couldn't reach the server. Check your connection.");
+      setState(
+        () => _error = "Couldn't reach the server. Check your connection.",
+      );
     } on TimeoutException {
       setState(() => _error = 'The request timed out. Please try again.');
     } catch (e) {
       final msg = e.toString().toLowerCase();
-      setState(() => _error = (msg.contains('socket') ||
-              msg.contains('connection') ||
-              msg.contains('network'))
-          ? "Couldn't reach the server. Check your connection."
-          : 'Something went wrong. Please try again.');
+      setState(
+        () =>
+            _error =
+                (msg.contains('socket') ||
+                        msg.contains('connection') ||
+                        msg.contains('network'))
+                    ? "Couldn't reach the server. Check your connection."
+                    : 'Something went wrong. Please try again.',
+      );
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -2801,8 +2978,9 @@ class _AuthDialogState extends ConsumerState<_AuthDialog> {
                         ? Icons.visibility_outlined
                         : Icons.visibility_off_outlined,
                   ),
-                  onPressed: () =>
-                      setState(() => _obscurePassword = !_obscurePassword),
+                  onPressed:
+                      () =>
+                          setState(() => _obscurePassword = !_obscurePassword),
                 ),
               ),
             ),
@@ -2810,29 +2988,31 @@ class _AuthDialogState extends ConsumerState<_AuthDialog> {
               const SizedBox(height: 12),
               Text(
                 _error!,
-                style: theme.textTheme.bodySmall
-                    ?.copyWith(color: cs.error),
+                style: theme.textTheme.bodySmall?.copyWith(color: cs.error),
               ),
             ],
             const SizedBox(height: 16),
             FilledButton(
               onPressed: _loading ? null : _submit,
-              child: _loading
-                  ? const SizedBox(
-                      width: 18,
-                      height: 18,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : Text(isSignIn ? 'Sign in' : 'Create account'),
+              child:
+                  _loading
+                      ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                      : Text(isSignIn ? 'Sign in' : 'Create account'),
             ),
             const SizedBox(height: 8),
             TextButton(
-              onPressed: _loading
-                  ? null
-                  : () => setState(() {
-                        _mode = isSignIn
-                            ? _AuthMode.createAccount
-                            : _AuthMode.signIn;
+              onPressed:
+                  _loading
+                      ? null
+                      : () => setState(() {
+                        _mode =
+                            isSignIn
+                                ? _AuthMode.createAccount
+                                : _AuthMode.signIn;
                         _error = null;
                       }),
               child: Text(
@@ -3121,12 +3301,16 @@ class JacanaLogoPainter extends CustomPainter {
     final sy = size.height / 100;
     Offset p(double x, double y) => Offset(x * sx, y * sy);
 
-    Paint fill(Color c) => Paint()..color = c..style = PaintingStyle.fill;
-    Paint stroke(Color c, double w) => Paint()
-      ..color = c
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = w * sx
-      ..strokeCap = StrokeCap.round;
+    Paint fill(Color c) =>
+        Paint()
+          ..color = c
+          ..style = PaintingStyle.fill;
+    Paint stroke(Color c, double w) =>
+        Paint()
+          ..color = c
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = w * sx
+          ..strokeCap = StrokeCap.round;
 
     // ── Legs ─────────────────────────────────────────────────────────────────
     const legColor = Color(0xFF7B9490);
@@ -3139,7 +3323,11 @@ class JacanaLogoPainter extends CustomPainter {
       [43.0, 93.0, 44.0, 98.0],
       [43.0, 93.0, 53.0, 96.0],
     ]) {
-      canvas.drawLine(p(toe[0], toe[1]), p(toe[2], toe[3]), stroke(legColor, 2));
+      canvas.drawLine(
+        p(toe[0], toe[1]),
+        p(toe[2], toe[3]),
+        stroke(legColor, 2),
+      );
     }
     canvas.drawLine(p(43, 93), p(36, 99), stroke(legColor, 1.8));
 
@@ -3149,17 +3337,34 @@ class JacanaLogoPainter extends CustomPainter {
       [67.0, 91.0, 68.0, 97.0],
       [67.0, 91.0, 77.0, 94.0],
     ]) {
-      canvas.drawLine(p(toe[0], toe[1]), p(toe[2], toe[3]), stroke(legColor, 2));
+      canvas.drawLine(
+        p(toe[0], toe[1]),
+        p(toe[2], toe[3]),
+        stroke(legColor, 2),
+      );
     }
 
     // ── Tail ─────────────────────────────────────────────────────────────────
-    final tail = Path()
-      ..moveTo(p(76, 60).dx, p(76, 60).dy)
-      ..cubicTo(p(87, 52).dx, p(87, 52).dy, p(90, 63).dx, p(90, 63).dy,
-          p(83, 68).dx, p(83, 68).dy)
-      ..cubicTo(p(79, 72).dx, p(79, 72).dy, p(73, 66).dx, p(73, 66).dy,
-          p(74, 62).dx, p(74, 62).dy)
-      ..close();
+    final tail =
+        Path()
+          ..moveTo(p(76, 60).dx, p(76, 60).dy)
+          ..cubicTo(
+            p(87, 52).dx,
+            p(87, 52).dy,
+            p(90, 63).dx,
+            p(90, 63).dy,
+            p(83, 68).dx,
+            p(83, 68).dy,
+          )
+          ..cubicTo(
+            p(79, 72).dx,
+            p(79, 72).dy,
+            p(73, 66).dx,
+            p(73, 66).dy,
+            p(74, 62).dx,
+            p(74, 62).dy,
+          )
+          ..close();
     canvas.drawPath(tail, fill(const Color(0xFF9B3512)));
 
     // ── Body ─────────────────────────────────────────────────────────────────
@@ -3169,24 +3374,49 @@ class JacanaLogoPainter extends CustomPainter {
     );
 
     // Wing shading
-    final wing = Path()
-      ..moveTo(p(35, 63).dx, p(35, 63).dy)
-      ..cubicTo(p(41, 50).dx, p(41, 50).dy, p(70, 53).dx, p(70, 53).dy,
-          p(76, 61).dx, p(76, 61).dy)
-      ..cubicTo(p(72, 67).dx, p(72, 67).dy, p(56, 70).dx, p(56, 70).dy,
-          p(40, 67).dx, p(40, 67).dy)
-      ..close();
-    canvas.drawPath(wing,
-        fill(const Color(0xFFA83C14).withValues(alpha: 0.5)));
+    final wing =
+        Path()
+          ..moveTo(p(35, 63).dx, p(35, 63).dy)
+          ..cubicTo(
+            p(41, 50).dx,
+            p(41, 50).dy,
+            p(70, 53).dx,
+            p(70, 53).dy,
+            p(76, 61).dx,
+            p(76, 61).dy,
+          )
+          ..cubicTo(
+            p(72, 67).dx,
+            p(72, 67).dy,
+            p(56, 70).dx,
+            p(56, 70).dy,
+            p(40, 67).dx,
+            p(40, 67).dy,
+          )
+          ..close();
+    canvas.drawPath(wing, fill(const Color(0xFFA83C14).withValues(alpha: 0.5)));
 
     // ── Chest / throat (yellow) ───────────────────────────────────────────────
-    final chest = Path()
-      ..moveTo(p(34, 68).dx, p(34, 68).dy)
-      ..cubicTo(p(26, 60).dx, p(26, 60).dy, p(27, 48).dx, p(27, 48).dy,
-          p(34, 43).dx, p(34, 43).dy)
-      ..cubicTo(p(39, 48).dx, p(39, 48).dy, p(39, 60).dx, p(39, 60).dy,
-          p(37, 68).dx, p(37, 68).dy)
-      ..close();
+    final chest =
+        Path()
+          ..moveTo(p(34, 68).dx, p(34, 68).dy)
+          ..cubicTo(
+            p(26, 60).dx,
+            p(26, 60).dy,
+            p(27, 48).dx,
+            p(27, 48).dy,
+            p(34, 43).dx,
+            p(34, 43).dy,
+          )
+          ..cubicTo(
+            p(39, 48).dx,
+            p(39, 48).dy,
+            p(39, 60).dx,
+            p(39, 60).dy,
+            p(37, 68).dx,
+            p(37, 68).dy,
+          )
+          ..close();
     canvas.drawPath(chest, fill(const Color(0xFFE09820)));
 
     // ── Head (dark slate blue) ───────────────────────────────────────────────
@@ -3203,27 +3433,65 @@ class JacanaLogoPainter extends CustomPainter {
     canvas.restore();
 
     // Yellow frontal shield (casque)
-    final shield = Path()
-      ..moveTo(p(26, 35).dx, p(26, 35).dy)
-      ..cubicTo(p(28, 27).dx, p(28, 27).dy, p(37, 29).dx, p(37, 29).dy,
-          p(37, 35).dx, p(37, 35).dy)
-      ..cubicTo(p(34, 40).dx, p(34, 40).dy, p(28, 39).dx, p(28, 39).dy,
-          p(26, 35).dx, p(26, 35).dy)
-      ..close();
+    final shield =
+        Path()
+          ..moveTo(p(26, 35).dx, p(26, 35).dy)
+          ..cubicTo(
+            p(28, 27).dx,
+            p(28, 27).dy,
+            p(37, 29).dx,
+            p(37, 29).dy,
+            p(37, 35).dx,
+            p(37, 35).dy,
+          )
+          ..cubicTo(
+            p(34, 40).dx,
+            p(34, 40).dy,
+            p(28, 39).dx,
+            p(28, 39).dy,
+            p(26, 35).dx,
+            p(26, 35).dy,
+          )
+          ..close();
     canvas.drawPath(shield, fill(const Color(0xFFE29420)));
 
     // Dark blue crown (top of head)
-    final crown = Path()
-      ..moveTo(p(22, 41).dx, p(22, 41).dy)
-      ..cubicTo(p(22, 33).dx, p(22, 33).dy, p(27, 27).dx, p(27, 27).dy,
-          p(34, 27).dx, p(34, 27).dy)
-      ..cubicTo(p(41, 27).dx, p(41, 27).dy, p(47, 33).dx, p(47, 33).dy,
-          p(47, 41).dx, p(47, 41).dy)
-      ..cubicTo(p(43, 38).dx, p(43, 38).dy, p(38, 36).dx, p(38, 36).dy,
-          p(34, 36).dx, p(34, 36).dy)
-      ..cubicTo(p(30, 36).dx, p(30, 36).dy, p(25, 38).dx, p(25, 38).dy,
-          p(22, 41).dx, p(22, 41).dy)
-      ..close();
+    final crown =
+        Path()
+          ..moveTo(p(22, 41).dx, p(22, 41).dy)
+          ..cubicTo(
+            p(22, 33).dx,
+            p(22, 33).dy,
+            p(27, 27).dx,
+            p(27, 27).dy,
+            p(34, 27).dx,
+            p(34, 27).dy,
+          )
+          ..cubicTo(
+            p(41, 27).dx,
+            p(41, 27).dy,
+            p(47, 33).dx,
+            p(47, 33).dy,
+            p(47, 41).dx,
+            p(47, 41).dy,
+          )
+          ..cubicTo(
+            p(43, 38).dx,
+            p(43, 38).dy,
+            p(38, 36).dx,
+            p(38, 36).dy,
+            p(34, 36).dx,
+            p(34, 36).dy,
+          )
+          ..cubicTo(
+            p(30, 36).dx,
+            p(30, 36).dy,
+            p(25, 38).dx,
+            p(25, 38).dy,
+            p(22, 41).dx,
+            p(22, 41).dy,
+          )
+          ..close();
     canvas.drawPath(crown, fill(const Color(0xFF1A2D50)));
 
     // ── Eye ──────────────────────────────────────────────────────────────────
@@ -3231,11 +3499,12 @@ class JacanaLogoPainter extends CustomPainter {
     canvas.drawCircle(p(27, 43), 1.8 * sx, fill(Colors.white));
 
     // ── Beak ─────────────────────────────────────────────────────────────────
-    final beak = Path()
-      ..moveTo(p(20, 45).dx, p(20, 45).dy)
-      ..lineTo(p(6, 42).dx, p(6, 42).dy)
-      ..lineTo(p(20, 50).dx, p(20, 50).dy)
-      ..close();
+    final beak =
+        Path()
+          ..moveTo(p(20, 45).dx, p(20, 45).dy)
+          ..lineTo(p(6, 42).dx, p(6, 42).dy)
+          ..lineTo(p(20, 50).dx, p(20, 50).dy)
+          ..close();
     canvas.drawPath(beak, fill(const Color(0xFF5E7872)));
     canvas.drawLine(p(7, 46), p(20, 47), stroke(const Color(0xFF4A6260), 0.8));
   }

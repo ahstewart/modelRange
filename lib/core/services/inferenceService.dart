@@ -705,7 +705,8 @@ class InferenceService {
           "image_to_text postprocessing did not produce a String for '$outputName'.",
         );
       case 'generated_image':
-        if (currentResult is img.Image) return GeneratedImageResult(currentResult);
+        if (currentResult is img.Image)
+          return GeneratedImageResult(currentResult);
         return ErrorResult(
           "generated_image postprocessing did not produce an img.Image for '$outputName'.",
         );
@@ -1013,18 +1014,22 @@ class InferenceService {
             if (finalData is Float32List) {
               final out = Float32List(H * W * C);
               for (int h = 0; h < H; h++)
-                for (int w = 0; w < W; w++)
-                  for (int c = 0; c < C; c++)
+                for (int w = 0; w < W; w++) {
+                  for (int c = 0; c < C; c++) {
                     out[c * H * W + h * W + w] =
-                        (finalData as Float32List)[h * W * C + w * C + c];
+                        (finalData)[h * W * C + w * C + c];
+                  }
+                }
               finalData = out;
             } else {
               final out = Uint8List(H * W * C);
               for (int h = 0; h < H; h++)
-                for (int w = 0; w < W; w++)
-                  for (int c = 0; c < C; c++)
+                for (int w = 0; w < W; w++) {
+                  for (int c = 0; c < C; c++) {
                     out[c * H * W + h * W + w] =
                         (finalData as Uint8List)[h * W * C + w * C + c];
+                  }
+                }
               finalData = out;
             }
             finaldataShape = [1, C, H, W];
@@ -1039,7 +1044,10 @@ class InferenceService {
         }
 
         // Use actual interpreter tensor shape as authoritative target.
-        List<int> targetInputShape = _getActualInputShape(preprocessingBlockIndex, []);
+        List<int> targetInputShape = _getActualInputShape(
+          preprocessingBlockIndex,
+          [],
+        );
         if (targetInputShape.isEmpty) {
           final inputName =
               modelPipeline!.preprocessing[preprocessingBlockIndex].input_name;
@@ -1052,17 +1060,18 @@ class InferenceService {
         }
 
         // Decide the reshape target: prefer interpreter shape when element counts match.
-        final int dataLen = (finalData is Float32List)
-            ? (finalData as Float32List).length
-            : (finalData is Uint8List ? (finalData as Uint8List).length : 0);
-        final int targetLen =
-            targetInputShape.fold<int>(1, (a, b) => a * b);
+        final int dataLen =
+            (finalData is Float32List)
+                ? (finalData).length
+                : (finalData is Uint8List ? (finalData).length : 0);
+        final int targetLen = targetInputShape.fold<int>(1, (a, b) => a * b);
         final List<int> reshapeTarget =
             (targetInputShape.isNotEmpty && dataLen == targetLen)
                 ? targetInputShape
                 : finaldataShape;
 
-        if (kDebugMode && finaldataShape.toString() != targetInputShape.toString()) {
+        if (kDebugMode &&
+            finaldataShape.toString() != targetInputShape.toString()) {
           debugPrint(
             "format: spatial shape $finaldataShape, model expects $targetInputShape"
             "${dataLen == targetLen ? ' — reshaping to model shape' : ' — incompatible, model may not accept direct image input'}",
@@ -1071,7 +1080,7 @@ class InferenceService {
 
         try {
           return (finalData is Float32List)
-              ? (finalData as Float32List).reshape(reshapeTarget)
+              ? (finalData).reshape(reshapeTarget)
               : (finalData as Uint8List).reshape(reshapeTarget);
         } catch (e) {
           if (kDebugMode) debugPrint("format step reshape failed: $e");
@@ -2197,10 +2206,11 @@ class InferenceService {
       case 'decode_image':
         // Converts a raw pixel tensor [1, H, W, C] (HWC) or [1, C, H, W] (CHW)
         // to an img.Image. Params: channel_format ("HWC"|"CHW"), value_range ("0_1"|"neg1_1"|"0_255").
-        final channelFormat = (step.params['channel_format'] as String?) ?? 'HWC';
-        final valueRange    = (step.params['value_range']    as String?) ?? '0_1';
+        final channelFormat =
+            (step.params['channel_format'] as String?) ?? 'HWC';
+        final valueRange = (step.params['value_range'] as String?) ?? '0_1';
 
-        int _scaleToUint8(num raw) {
+        int scaleToUint8(num raw) {
           final double v = raw.toDouble();
           final double scaled;
           switch (valueRange) {
@@ -2225,9 +2235,15 @@ class InferenceService {
           decodedImg = img.Image(width: W, height: H);
           for (int h = 0; h < H; h++) {
             for (int w = 0; w < W; w++) {
-              final r = _scaleToUint8(((batch[0] as List)[h] as List)[w] as num);
-              final g = C > 1 ? _scaleToUint8(((batch[1] as List)[h] as List)[w] as num) : r;
-              final b = C > 2 ? _scaleToUint8(((batch[2] as List)[h] as List)[w] as num) : r;
+              final r = scaleToUint8(((batch[0] as List)[h] as List)[w] as num);
+              final g =
+                  C > 1
+                      ? scaleToUint8(((batch[1] as List)[h] as List)[w] as num)
+                      : r;
+              final b =
+                  C > 2
+                      ? scaleToUint8(((batch[2] as List)[h] as List)[w] as num)
+                      : r;
               decodedImg.setPixel(w, h, img.ColorRgb8(r, g, b));
             }
           }
@@ -2239,9 +2255,9 @@ class InferenceService {
           for (int h = 0; h < H; h++) {
             for (int w = 0; w < W; w++) {
               final pixel = (batch[h] as List)[w] as List;
-              final r = _scaleToUint8(pixel[0] as num);
-              final g = pixel.length > 1 ? _scaleToUint8(pixel[1] as num) : r;
-              final b = pixel.length > 2 ? _scaleToUint8(pixel[2] as num) : r;
+              final r = scaleToUint8(pixel[0] as num);
+              final g = pixel.length > 1 ? scaleToUint8(pixel[1] as num) : r;
+              final b = pixel.length > 2 ? scaleToUint8(pixel[2] as num) : r;
               decodedImg.setPixel(w, h, img.ColorRgb8(r, g, b));
             }
           }
