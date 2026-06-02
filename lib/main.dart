@@ -26,6 +26,7 @@ import 'core/providers/stats_providers.dart';
 import 'core/data_models/inference_stat.dart';
 import 'core/providers/auth_providers.dart';
 import 'core/services/api_service.dart';
+import 'core/config/app_config.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 // Returns free bytes available on the filesystem containing [dirPath], or null on failure.
@@ -58,14 +59,9 @@ Future<void> main() async {
     () async {
       WidgetsFlutterBinding.ensureInitialized();
 
-      // TODO: Replace with your Supabase project URL and anon key.
-      // For local development with `supabase start`, the URL is typically
-      // http://10.0.2.2:54321 (Android emulator) and the anon key is printed
-      // by `supabase status`. For production, use your project's values from
-      // the Supabase dashboard (Settings → API).
       await Supabase.initialize(
-        url: 'http://10.0.2.2:54321',
-        anonKey: 'YOUR_SUPABASE_ANON_KEY',
+        url: AppConfig.supabaseUrl,
+        anonKey: AppConfig.supabaseAnonKey,
       );
 
       await DeviceInfoHelper.init();
@@ -252,14 +248,26 @@ class MyApp extends StatelessWidget {
   }
 }
 
-final selectedModelProvider = StateProvider<MLModel?>((ref) {
-  return null;
-});
+class _SelectedModelNotifier extends Notifier<MLModel?> {
+  @override
+  MLModel? build() => null;
+}
+
+final selectedModelProvider =
+    NotifierProvider<_SelectedModelNotifier, MLModel?>(
+      _SelectedModelNotifier.new,
+    );
 
 // Provider to track which model's modal is open
-final selectedModelModalProvider = StateProvider<MLModel?>((ref) {
-  return null;
-});
+class _SelectedModelModalNotifier extends Notifier<MLModel?> {
+  @override
+  MLModel? build() => null;
+}
+
+final selectedModelModalProvider =
+    NotifierProvider<_SelectedModelModalNotifier, MLModel?>(
+      _SelectedModelModalNotifier.new,
+    );
 
 // Model for storing downloaded model metadata
 class DownloadedModel {
@@ -337,23 +345,28 @@ class DownloadedModelsState {
 
 // Provider for managing downloaded models
 final downloadedModelsProvider =
-    StateNotifierProvider<DownloadedModelsNotifier, DownloadedModelsState>(
-      (ref) => DownloadedModelsNotifier(ref.watch(sharedPreferencesProvider)),
+    NotifierProvider<DownloadedModelsNotifier, DownloadedModelsState>(
+      DownloadedModelsNotifier.new,
     );
 
-class DownloadedModelsNotifier extends StateNotifier<DownloadedModelsState> {
+class DownloadedModelsNotifier extends Notifier<DownloadedModelsState> {
   static const _prefsKey = 'downloaded_models_v1';
-  final SharedPreferences _prefs;
+  late SharedPreferences _prefs;
+  bool _disposed = false;
 
-  DownloadedModelsNotifier(this._prefs)
-    : super(const DownloadedModelsState(models: [], isLoaded: false)) {
-    _initialize();
+  @override
+  DownloadedModelsState build() {
+    _disposed = false;
+    _prefs = ref.watch(sharedPreferencesProvider);
+    ref.onDispose(() => _disposed = true);
+    Future.microtask(_initialize);
+    return const DownloadedModelsState(models: [], isLoaded: false);
   }
 
   Future<void> _initialize() async {
     await _loadDownloadedModels();
     await _scanDiskForMissingModels();
-    if (mounted)
+    if (!_disposed)
       state = DownloadedModelsState(models: state.models, isLoaded: true);
   }
 
@@ -362,7 +375,7 @@ class DownloadedModelsNotifier extends StateNotifier<DownloadedModelsState> {
       final raw = _prefs.getString(_prefsKey);
       if (raw == null) return;
       final list = (jsonDecode(raw) as List).cast<Map<String, dynamic>>();
-      if (mounted) {
+      if (!_disposed)
         state = DownloadedModelsState(
           models:
               list
@@ -371,7 +384,6 @@ class DownloadedModelsNotifier extends StateNotifier<DownloadedModelsState> {
                   .toList(),
           isLoaded: false,
         );
-      }
     } catch (e, st) {
       debugPrint('[DownloadedModels] Failed to load from prefs: $e\n$st');
     }
@@ -421,7 +433,7 @@ class DownloadedModelsNotifier extends StateNotifier<DownloadedModelsState> {
         }
       }
 
-      if (recovered.isNotEmpty && mounted) {
+      if (recovered.isNotEmpty && !_disposed) {
         state = DownloadedModelsState(
           models: [...state.models, ...recovered],
           isLoaded: false,
@@ -491,14 +503,15 @@ class InProgressDownload {
   );
 }
 
-final inProgressDownloadsProvider = StateNotifierProvider<
+final inProgressDownloadsProvider = NotifierProvider<
   InProgressDownloadsNotifier,
   Map<String, InProgressDownload>
->((ref) => InProgressDownloadsNotifier());
+>(InProgressDownloadsNotifier.new);
 
 class InProgressDownloadsNotifier
-    extends StateNotifier<Map<String, InProgressDownload>> {
-  InProgressDownloadsNotifier() : super({});
+    extends Notifier<Map<String, InProgressDownload>> {
+  @override
+  Map<String, InProgressDownload> build() => {};
 
   void startDownload(InProgressDownload download) {
     state = {...state, download.versionId: download};
@@ -3514,9 +3527,14 @@ class JacanaLogoPainter extends CustomPainter {
 }
 
 // provider for selected page
-final selectedIndexProvider = StateProvider<int>((ref) {
-  return 0;
-});
+class _SelectedIndexNotifier extends Notifier<int> {
+  @override
+  int build() => 0;
+}
+
+final selectedIndexProvider = NotifierProvider<_SelectedIndexNotifier, int>(
+  _SelectedIndexNotifier.new,
+);
 
 class ModelList extends ConsumerStatefulWidget {
   const ModelList({super.key, required this.title});

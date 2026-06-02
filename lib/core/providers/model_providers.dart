@@ -10,7 +10,7 @@ part 'model_providers.g.dart';
 
 /// Singleton provider for the API service
 @riverpod
-ApiService apiService(ApiServiceRef ref) {
+ApiService apiService(Ref ref) {
   return ApiService();
 }
 
@@ -20,14 +20,14 @@ ApiService apiService(ApiServiceRef ref) {
 
 /// Fetch all models from the backend
 @riverpod
-Future<List<MLModel>> allModels(AllModelsRef ref) async {
+Future<List<MLModel>> allModels(Ref ref) async {
   final api = ref.watch(apiServiceProvider);
   return api.getModels();
 }
 
 /// Fetch a specific model by ID
 @riverpod
-Future<MLModel> modelById(ModelByIdRef ref, String modelId) async {
+Future<MLModel> modelById(Ref ref, String modelId) async {
   final api = ref.watch(apiServiceProvider);
   return api.getModel(modelId);
 }
@@ -35,7 +35,7 @@ Future<MLModel> modelById(ModelByIdRef ref, String modelId) async {
 /// Get all models that have at least one supported version
 /// Uses backend filtering via supported_only=true parameter
 @riverpod
-Future<List<MLModel>> supportedModels(SupportedModelsRef ref) async {
+Future<List<MLModel>> supportedModels(Ref ref) async {
   final api = ref.watch(apiServiceProvider);
   return api.getModels(supportedOnly: true);
 }
@@ -47,7 +47,7 @@ Future<List<MLModel>> supportedModels(SupportedModelsRef ref) async {
 /// Fetch all versions for a specific model
 @riverpod
 Future<List<ModelVersion>> modelVersions(
-  ModelVersionsRef ref,
+  Ref ref,
   String modelId,
 ) async {
   final api = ref.watch(apiServiceProvider);
@@ -57,7 +57,7 @@ Future<List<ModelVersion>> modelVersions(
 /// Get only supported versions for a model
 @riverpod
 Future<List<ModelVersion>> supportedVersions(
-  SupportedVersionsRef ref,
+  Ref ref,
   String modelId,
 ) async {
   final versions = await ref.watch(modelVersionsProvider(modelId).future);
@@ -66,7 +66,7 @@ Future<List<ModelVersion>> supportedVersions(
 
 /// Fetch a specific model version
 @riverpod
-Future<ModelVersion> versionById(VersionByIdRef ref, String versionId) async {
+Future<ModelVersion> versionById(Ref ref, String versionId) async {
   final api = ref.watch(apiServiceProvider);
   return api.getModelVersion(versionId);
 }
@@ -108,7 +108,7 @@ class SelectedModelVersion extends _$SelectedModelVersion {
 /// Download model file (tflite binary)
 @riverpod
 Future<List<int>> downloadModelFile(
-  DownloadModelFileRef ref,
+  Ref ref,
   String downloadUrl,
 ) async {
   final api = ref.watch(apiServiceProvider);
@@ -118,7 +118,7 @@ Future<List<int>> downloadModelFile(
 /// Download asset file (labels, etc)
 @riverpod
 Future<List<int>> downloadAssetFile(
-  DownloadAssetFileRef ref,
+  Ref ref,
   String downloadUrl,
 ) async {
   final api = ref.watch(apiServiceProvider);

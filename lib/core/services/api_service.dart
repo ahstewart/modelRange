@@ -3,13 +3,12 @@ import 'dart:convert';
 import 'dart:async';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
+import '../config/app_config.dart';
 import '../data_models/api_models.dart';
 import '../data_models/inference_stat.dart';
 
 class ApiService {
-  // TODO: Update this to your actual backend URL
-  static const String baseUrl =
-      'http://10.0.2.2:8000/api/v1'; // Change this to your backend URL
+  static const String baseUrl = AppConfig.apiBaseUrl;
 
   /// Timeout applied to all external calls — metadata and file downloads.
   static const Duration _apiTimeout = Duration(seconds: 30);

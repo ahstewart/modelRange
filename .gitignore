@@ -1,3 +1,6 @@
+# Environment config (contains secrets — use env.example.json as a template)
+env.json
+
 # Miscellaneous
 *.class
 *.log

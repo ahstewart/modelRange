@@ -18,11 +18,13 @@ final statsServiceProvider = Provider<StatsService>((ref) {
 // ---------------------------------------------------------------------------
 // Telemetry opt-in setting (SharedPreferences, default = false)
 // ---------------------------------------------------------------------------
-class TelemetryOptInNotifier extends StateNotifier<bool> {
+class TelemetryOptInNotifier extends Notifier<bool> {
   static const _key = 'telemetry_opt_in';
 
-  TelemetryOptInNotifier() : super(false) {
-    _load();
+  @override
+  bool build() {
+    Future.microtask(_load);
+    return false;
   }
 
   Future<void> _load() async {
@@ -37,9 +39,8 @@ class TelemetryOptInNotifier extends StateNotifier<bool> {
   }
 }
 
-final telemetryOptInProvider =
-    StateNotifierProvider<TelemetryOptInNotifier, bool>(
-  (ref) => TelemetryOptInNotifier(),
+final telemetryOptInProvider = NotifierProvider<TelemetryOptInNotifier, bool>(
+  TelemetryOptInNotifier.new,
 );
 
 // ---------------------------------------------------------------------------
